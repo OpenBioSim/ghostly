@@ -1,0 +1,9 @@
+name: ghostly
+
+channels:
+  - conda-forge
+  - openbiosim/label/dev
+
+dependencies:
+  - biosimspace
+  - loguru
