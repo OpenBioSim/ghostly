@@ -66,7 +66,13 @@ stream file for the perturbable molecule, or AMBER or GROMACS files for the two 
 The format can be specified using the the `--output-format` option. If you require input
 for a free-energy perturbation simulation, e.g. a hybrid GROMACS toplogy file, the you can
 use the stream file with [BioSimSpace](https://biosimspace.openbiosim.org) to generate the
-required input files. Note that when a stream file is used as input, then the ouput will
-always be a stream file, regardless of the `--output-format` option.
+required input files.
+
+> [!NOTE]
+> When a stream file is used as input, the `--mapping` option is ignored.
+
+>[!NOTE]
+> When a stream file is used as inpput the output will always be a stream file,
+> regardless of the `--output-format` option.
 
 Please run `ghostly --help` for more details of other configuration options.
