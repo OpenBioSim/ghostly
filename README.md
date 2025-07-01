@@ -48,14 +48,25 @@ are the corresponding atom names in the perturbed state. This allows the mapping
 be generated programmatically by any suitable external tool.
 
 ```bash
-ghostly reference.prm7 reference.rst7 perturbed.prm7 perturbed.rst7 --log-level debug
+ghostly --reference reference.* --perturbed.* --mapping '{0: 0, 1: 4, 2: 3, 3: 2, 4: 1}' --log-level debug
 ```
+
+Alternatively, you can pass a stream file containing a perturbable [BioSimSpace](https://biosimspace.openbiosim.org)
+system, which already contains the merged end states, using the `--system` option.
+
+```bash
+ghostly --system system.bss --log-level debug
+```
+
+> [!NOTE]
+> The `--system` option takes precedence over the `--reference` and `--perturbed` options.
 
 When finished, the program will output a [BioSimSpace](https://biosimspace.openbiosim.org)
 stream file for the perturbable molecule, or AMBER or GROMACS files for the two end states.
 The format can be specified using the the `--output-format` option. If you require input
 for a free-energy perturbation simulation, e.g. a hybrid GROMACS toplogy file, the you can
 use the stream file with [BioSimSpace](https://biosimspace.openbiosim.org) to generate the
-required input files.
+required input files. Note that when a stream file is used as input, then the ouput will
+always be a stream file, regardless of the `--output-format` option.
 
 Please run `ghostly --help` for more details of other configuration options.

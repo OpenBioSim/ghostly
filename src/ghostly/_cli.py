@@ -48,27 +48,30 @@ def run():
     )
 
     parser.add_argument(
-        "reference_topology",
+        "--system",
         type=str,
-        help="Topology file for the reference molecule.",
+        help=(
+            "Stream file for the perturbable system. This takes precedence over ",
+            "the reference and perturbed molecule files.",
+        ),
+        nargs=1,
+        required=False,
     )
 
     parser.add_argument(
-        "reference_coordinates",
+        "--reference",
         type=str,
-        help="Coordinate file for the reference molecule.",
+        help="Topology and coordinate file for the reference molecule.",
+        nargs=2,
+        required=False,
     )
 
     parser.add_argument(
-        "perturbed_topology",
+        "--perturbed",
         type=str,
         help="Topology file for the perturbed molecule.",
-    )
-
-    parser.add_argument(
-        "perturbed_coordinates",
-        type=str,
-        help="Coordinate file for the perturbed molecule.",
+        nargs=2,
+        required=False,
     )
 
     parser.add_argument(
@@ -151,23 +154,49 @@ def run():
     logger.remove()
     logger.add(sys.stderr, level=args.log_level.upper(), enqueue=True)
 
-    # Try to load the reference.
-    try:
-        reference = BSS.IO.readMolecules(
-            [args.reference_topology, args.reference_coordinates]
-        )[0]
-    except Exception as e:
-        logger.error(f"An error occurred while loading the reference molecule: {e}")
-        sys.exit(1)
+    # Make sure that we've got a steam file, or files for the
+    # reference and perturbed molecules.
+    if args.system is None:
+        if args.reference is None or args.perturbed is None:
+            logger.error(
+                "You must provide either a stream file or both reference and perturbed "
+                "molecule files."
+            )
+            sys.exit(1)
 
-    # Try to load the perturbed molecule.
-    try:
-        perturbed = BSS.IO.readMolecules(
-            [args.perturbed_topology, args.perturbed_coordinates]
-        )[0]
-    except Exception as e:
-        logger.error(f"An error occurred while loading the perturbed molecule: {e}")
-        sys.exit(1)
+        # Try to load the reference.
+        try:
+            reference = BSS.IO.readMolecules(args.reference)[0]
+        except Exception as e:
+            logger.error(f"An error occurred while loading the reference molecule: {e}")
+            sys.exit(1)
+
+        # Try to load the perturbed molecule.
+        try:
+            perturbed = BSS.IO.readMolecules(args.perturbed)[0]
+        except Exception as e:
+            logger.error(f"An error occurred while loading the perturbed molecule: {e}")
+            sys.exit(1)
+    else:
+        if args.reference is not None or args.perturbed is not None:
+            logger.warning(
+                "Stream file and molecule files provided. Stream file takes precedence."
+            )
+
+        # Try to load the system from the stream file.
+        try:
+            system = sr.stream.load(args.system[0])
+        except Exception as e:
+            logger.error(
+                f"An error occurred while loading the system from the stream file: {e}"
+            )
+            sys.exit(1)
+
+        if not isinstance(system, (sr.system.System, sr.legacy.System.System)):
+            raise TypeError("The provided stream file does not contain a valid system.")
+
+        # The molecule is already merged, so set the mapping to None.
+        args.mapping = None
 
     # Try to parse the mapping.
     if args.mapping is not None:
@@ -212,20 +241,22 @@ def run():
         sys.exit(1)
 
     # Try to merge the reference and perturbed molecules.
-    try:
-        merged = BSS.Align.merge(
-            reference,
-            perturbed,
-            mapping=mapping,
-            force=True,
-        )
-    except Exception as e:
-        logger.error(f"An error occurred while merging the molecules: {e}")
-        sys.exit(1)
+    if args.system is None:
+        try:
+            merged = BSS.Align.merge(
+                reference,
+                perturbed,
+                mapping=mapping,
+                force=True,
+            )
+        except Exception as e:
+            logger.error(f"An error occurred while merging the molecules: {e}")
+            sys.exit(1)
 
     # Try to apply the modifications.
     try:
-        system = sr.system.System(merged.toSystem()._sire_object)
+        if args.system is None:
+            system = merged.toSystem()._sire_object
         system = modify(system)
     except Exception as e:
         logger.error(
@@ -234,21 +265,28 @@ def run():
         sys.exit(1)
 
     # Try to save the system.
-    try:
-        if args.output_format == "bss":
-            sr.stream.save(system, f"{args.output_prefix}.bss")
-        else:
-            if args.output_format == "amber":
-                formats = ["prm7", "rst7"]
-            elif args.output_format == "gromacs":
-                formats = ["grotop", "gro87"]
+    if args.system is None:
+        try:
+            if args.output_format == "bss":
+                sr.stream.save(system, f"{args.output_prefix}.bss")
+            else:
+                if args.output_format == "amber":
+                    formats = ["prm7", "rst7"]
+                elif args.output_format == "gromacs":
+                    formats = ["grotop", "gro87"]
 
-            reference = merged._toRegularMolecule()
-            perturbed = merged._toRegularMolecule(is_lambda1=True)
+                reference = merged._toRegularMolecule()
+                perturbed = merged._toRegularMolecule(is_lambda1=True)
 
-            BSS.IO.saveMolecules(args.output_prefix + "_reference", reference, formats)
-            BSS.IO.saveMolecules(args.output_prefix + "_perturbed", perturbed, formats)
+                BSS.IO.saveMolecules(
+                    args.output_prefix + "_reference", reference, formats
+                )
+                BSS.IO.saveMolecules(
+                    args.output_prefix + "_perturbed", perturbed, formats
+                )
 
-    except Exception as e:
-        logger.error(f"An error occurred while saving the modified end states: {e}")
-        sys.exit(1)
+        except Exception as e:
+            logger.error(f"An error occurred while saving the modified end states: {e}")
+            sys.exit(1)
+    else:
+        sr.stream.save(system, f"{args.output_prefix}.bss")
