@@ -69,10 +69,7 @@ use the stream file with [BioSimSpace](https://biosimspace.openbiosim.org) to ge
 required input files.
 
 > [!NOTE]
-> When a stream file is used as input, the `--mapping` option is ignored.
-
->[!NOTE]
-> When a stream file is used as inpput the output will always be a stream file,
-> regardless of the `--output-format` option.
+> When a stream file is used as input, the `--mapping` option is ignored. and
+> the output will always be a stream file, regardless of the `--output-format` option.
 
 Please run `ghostly --help` for more details of other configuration options.
