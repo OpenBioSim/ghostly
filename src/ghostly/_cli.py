@@ -95,7 +95,7 @@ def run():
             "The force constant to use to when setting angle terms involving ghost "
             "atoms to 90 degrees to avoid flapping."
         ),
-        default="1000 kcal/mol/rad**2",
+        default="100 kcal/mol/rad**2",
         required=False,
     )
 
@@ -106,7 +106,7 @@ def run():
             "The force constant to use when setting angle terms involving ghost atoms "
             "for non-planar triple junctions."
         ),
-        default="100 kcal/mol/rad**2",
+        default="5 kcal/mol/rad**2",
         required=False,
     )
 
