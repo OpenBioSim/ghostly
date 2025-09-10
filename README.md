@@ -3,9 +3,17 @@
 [![GitHub Actions](https://github.com/openbiosim/somd2/actions/workflows/main.yaml/badge.svg)](https://github.com/openbiosim/somd2/actions/workflows/main.yaml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-Modification of ghost atom bonded terms to avoid spurious coupling
-to the physical system using the approach described in
-[this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
+``Ghostly`` is a package to perform modification of ghost (dummy) atom bonded
+terms for alchemical free energy calculations, using the approach described in
+[this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper. These modifications
+were designed to solve two key issues:
+
+1) To ensure that ghost atoms only give a multiplicative contribution to the
+partition function, which will cancel when computing double free-energy
+differences.
+
+2) To avoid spurious coupling between the physical and ghost systems, which
+can affect the equilibrium geometry of the physical system.
 
 ## Installation
 
