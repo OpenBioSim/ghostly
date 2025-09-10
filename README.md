@@ -51,8 +51,8 @@ Ghostly requires topology and coordinate files for the reference and perturbed m
 as input, along with an optional `mapping` dictionary that specifies the mapping between
 atoms in the end states. The molecular inputs can be in any valid file format supported
 by [Sire](https://sire.openbiosim.org). The mapping should be a string representation
-of a dictionary, where the keys are atom names in the reference state and the values
-are the corresponding atom names in the perturbed state. This allows the mapping to
+of a dictionary, where the keys are atom indices in the reference state and the values
+are the corresponding atom indices in the perturbed state. This allows the mapping to
 be generated programmatically by any suitable external tool.
 
 ```bash
