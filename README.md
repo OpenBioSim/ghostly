@@ -6,8 +6,8 @@
 Modification of ghost atom bonded terms to avoid spurious coupling
 to the physical system using the approach described in
 [this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
-## Installation
 
+## Installation
 
 First create a conda environment using the provided environment file:
 
