@@ -5,7 +5,8 @@
 
 Ghostly is a package to perform modification of ghost (dummy) atom bonded
 terms for alchemical free energy calculations, using the approach described in
-[this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper. These modifications
+the paper "Dummy Atoms in Alchemical Free Energy Calculations", available
+[here](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328). These modifications
 were designed to solve two key issues:
 
 1) To ensure that ghost atoms only give a multiplicative contribution to the
