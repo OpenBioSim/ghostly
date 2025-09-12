@@ -26,7 +26,7 @@ conda env create -f environment.yaml
 
 (We recommend using [Miniforge](https://github.com/conda-forge/miniforge).)
 
-Now install `ghosty` into the environment:
+Now install `ghostly` into the environment:
 
 ```
 conda activate ghostly
