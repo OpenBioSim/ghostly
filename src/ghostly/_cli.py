@@ -257,7 +257,7 @@ def run():
     try:
         if args.system is None:
             system = merged.toSystem()._sire_object
-        system = modify(system)
+        system = modify(system, k_hard.value(), k_soft.value(), args.optimise_angles)
     except Exception as e:
         logger.error(
             f"An error occurred while applying the ghost atom modifications: {e}"
