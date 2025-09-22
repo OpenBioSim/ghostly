@@ -287,7 +287,7 @@ python scripts/measure_angle.py somd1/mod/lambda_1/somd.prm7 somd1/mod/lambda_1/
 
 > [!NOTE]
 > The merged molecule uses the reference state (lambda = 0) for atom indexing,
-> so we use indices 22, 24, and 27 for both end states when measuring the angle.
+> so we use indices 22, 24, and 27 for both end states when measuring angles.
 
 Angle distributions can be measured and visualised using another script:
 
