@@ -16,6 +16,11 @@ differences.
 2) To avoid spurious coupling between the physical and ghost systems, which
 can affect the equilibrium geometry of the physical system.
 
+Ghostly is incorporated into the [SOMD2](https://github.com/openbiosim/somd2)
+free-energy perturbation engine.
+
+See the [examples](examples) directory for more details.
+
 ## Installation
 
 First create a conda environment using the provided environment file:

@@ -1,0 +1,203 @@
+lig_ejm42
+  xed2sdf           3D
+ 
+ 35 36  0  0  0  0  0  0  0  0999 V2000
+   -5.3540   -3.6915  -16.2345 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -4.7691   -4.9689  -16.2177 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -5.5347   -6.0946  -15.8561 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -6.8966   -5.9468  -15.4840 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -7.4850   -4.6563  -15.5235 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -6.7116   -3.5389  -15.9005 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -9.1599   -4.4089  -15.1537 Cl  0  0  0  0  0  0  0  0  0  0  0  0
+   -7.7049   -7.1318  -15.0417 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -8.1086   -7.2070  -13.8803 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -7.9133   -8.0454  -16.0060 N   0  0  0  0  0  0  0  0  0  0  0  0
+   -8.7328   -9.2042  -16.0075 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -9.5847   -9.5857  -14.9496 C   0  0  0  0  0  0  0  0  0  0  0  0
+  -10.3834  -10.7273  -15.1242 C   0  0  0  0  0  0  0  0  0  0  0  0
+  -10.3610  -11.4928  -16.2378 N   0  0  0  0  0  0  0  0  0  0  0  0
+   -9.5431  -11.1514  -17.2605 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -8.7262   -9.9969  -17.1722 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -9.5690  -11.9543  -18.4378 N   0  0  0  0  0  0  0  0  0  0  0  0
+   -8.6819  -12.0641  -19.4453 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -7.6202  -11.4430  -19.5152 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -9.0510  -13.0413  -20.5692 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -7.8469  -13.8628  -21.0583 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -4.7606   -7.6372  -15.8755 Cl  0  0  0  0  0  0  0  0  0  0  0  0
+   -4.7624   -2.8305  -16.5093 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -7.1623   -2.5582  -15.9347 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -7.4444   -7.8574  -16.8798 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -8.1003   -9.6887  -17.9930 H   0  0  0  0  0  0  0  0  0  0  0  0
+  -10.3994  -12.5262  -18.5271 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -9.4653  -12.4640  -21.3962 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -9.8431  -13.7223  -20.2525 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -8.1472  -14.5422  -21.8545 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -7.4224  -14.4613  -20.2530 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -7.0585  -13.2227  -21.4540 H   0  0  0  0  0  0  0  0  0  0  0  0
+  -11.0583  -11.0391  -14.3397 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -9.6732   -9.0227  -14.0335 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.7273   -5.0868  -16.4812 H   0  0  0  0  0  0  0  0  0  0  0  0
+  1  2  2  0
+  1  6  1  0
+  2  3  1  0
+  3  4  2  0
+  3 22  1  0
+  4  5  1  0
+  4  8  1  0
+  5  6  2  0
+  5  7  1  0
+  8  9  2  0
+  8 10  1  0
+ 10 11  1  0
+ 11 12  2  0
+ 11 16  1  0
+ 12 13  1  0
+ 13 14  2  0
+ 14 15  1  0
+ 15 16  2  0
+ 15 17  1  0
+ 17 18  1  0
+ 18 19  2  0
+ 18 20  1  0
+ 20 21  1  0
+  2 35  1  0
+  6 24  1  0
+ 10 25  1  0
+ 12 34  1  0
+ 13 33  1  0
+ 16 26  1  0
+ 17 27  1  0
+ 20 28  1  0
+ 20 29  1  0
+ 21 30  1  0
+ 21 31  1  0
+ 21 32  1  0
+ 23  1  1  0
+M  END
+>  <s_m_source_file>
+ligprep_tyk2.smi
+
+>  <i_m_source_file_index>
+2
+
+>  <i_lp_mmshare_version>
+53161
+
+>  <i_f3d_flags>
+0
+
+>  <s_epik_input>
+Q2xjMVtjSF1bY0hdW2NIXWMoQ2wpYzFDKD1PKVtOSF1jMltjSF1bY0hdbmMoW2NIXTIpW05IXUMoPU8pW0NIMl1bQ0gzXQ==
+
+>  <s_epik_cmdline>
+J2VwaWtfcHl0aG9uJywgJy1waHQnLCAnMC4wJywgJy1waCcsICc3LjQnLCAnLXRuJywgJzgnLCAnLW1hJywgJzUwMCcsICctaW1hZScsICc8aW5maWxlLm1hZT4nLCAnLW9tYWUnLCAnPG91dGZpbGUubWFlPic=
+
+>  <r_lp_tautomer_probability>
+1
+
+>  <r_epik_Ionization_Penalty>
+  0.0034
+
+>  <r_epik_Ionization_Penalty_Charging>
+  0.0000
+
+>  <r_epik_Ionization_Penalty_Neutral>
+  0.0034
+
+>  <r_epik_State_Penalty>
+ -0.0000
+
+>  <r_epik_Charging_Adjusted_Penalty>
+0
+
+>  <i_epik_Tot_Q>
+0
+
+>  <i_epik_Tot_abs_Q>
+0
+
+>  <s_lp_Force_Field>
+S-OPLS
+
+>  <r_lp_Energy>
+29.4428
+
+>  <b_lp_Chiralities_Consistent>
+1
+
+>  <s_lp_Variant>
+lig_ejm_42-1
+
+>  <s_i_glide_gridfile>
+glide-grid_TYK2-4GIH
+
+>  <i_i_glide_lignum>
+2
+
+>  <i_i_glide_rotatable_bonds>
+6
+
+>  <r_i_docking_score>
+-9.54163593253454
+
+>  <r_i_glide_ligand_efficiency>
+-0.433710724206116
+
+>  <r_i_glide_ligand_efficiency_sa>
+-1.21527450610041
+
+>  <r_i_glide_ligand_efficiency_ln>
+-2.33232386153848
+
+>  <r_i_glide_gscore>
+-9.54163593253454
+
+>  <r_i_glide_lipo>
+-3.51010401182842
+
+>  <r_i_glide_hbond>
+-0.568287738782123
+
+>  <r_i_glide_metal>
+-0
+
+>  <r_i_glide_rewards>
+-2.48187138181937
+
+>  <r_i_glide_evdw>
+-48.9517860412598
+
+>  <r_i_glide_ecoul>
+-8.18775081634521
+
+>  <r_i_glide_erotb>
+0.69437912441015
+
+>  <r_i_glide_esite>
+0
+
+>  <r_i_glide_emodel>
+-88.1988315651031
+
+>  <r_i_glide_energy>
+-57.139536857605
+
+>  <r_i_glide_einternal>
+0.130575686693192
+
+>  <i_i_glide_confnum>
+2
+
+>  <i_i_glide_posenum>
+4
+
+>  <r_i_glide_eff_state_penalty>
+-0
+
+>  <r_i_glide_rmsd>
+0.0577662887487658
+
+>  <s_glide_core_constrain_type>
+snapped_core_restrain
+
+$$$$
