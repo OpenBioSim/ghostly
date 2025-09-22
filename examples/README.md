@@ -172,7 +172,7 @@ d.run("1ns", frame_frequency="1ps")
 # Commit the changes.
 ejm42 = d.commit()
 
-# Save the final structure and trajectory.
+# Save the topology and trajectory.
 sr.save(ejm42, "ejm42.prm7")
 sr.save(ejm42.trajectory(), "ejm42.dcd")
 
