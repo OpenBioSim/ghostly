@@ -1,0 +1,10 @@
+name: ghostly
+
+channels:
+  - conda-forge
+  - openbiosim/label/dev
+
+dependencies:
+  - biosimspace
+  - pip:
+      - git+https://github.com/openbiosim/ghostly

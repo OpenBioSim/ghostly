@@ -1,12 +1,22 @@
 # Examples
 
+This directory contains examples demonstrating the use of `ghostly` for
+modification of bonded terms involving ghost atoms in alchemical free energy
+perturbations. To create a conda environment with the required dependencies,
+you can use the provided `environment.yml` file:
+
+```bash
+conda env create -f environment.yml
+conda activate ghostly
+```
+
 ## ejm42 &#8594; ejm54
 
 ### Set up
 
 This example perturbation is taken from the TYK2 section of the Wang et al.
 free-energy perturbation dataset. The perturbation involves an SP3 (tetrahedral)
-to SP2 (trigonal planar) hybridization change on a carbon atom, which is
+carbon to to SP2 (trigonal planar) nitrogen hybridization change, which is
 poorly modelled by traditional ghost atom handling schemes.
 
 First, let's load the input ligands using [BioSimSpace](https://biosimspace.openbiosim.org):
