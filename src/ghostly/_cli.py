@@ -122,6 +122,17 @@ def run():
     )
 
     parser.add_argument(
+        "--num-optimise",
+        type=int,
+        help=(
+            "The number of repeats to use when optimising the angle terms involving "
+            "ghost atoms for non-planar triple junctions."
+        ),
+        default=10,
+        required=False,
+    )
+
+    parser.add_argument(
         "--output-prefix",
         type=str,
         help="File prefix for the output file.",
@@ -257,7 +268,13 @@ def run():
     try:
         if args.system is None:
             system = merged.toSystem()._sire_object
-        system = modify(system, k_hard.value(), k_soft.value(), args.optimise_angles)
+        system = modify(
+            system,
+            k_hard.value(),
+            k_soft.value(),
+            args.optimise_angles,
+            args.num_optimise,
+        )
     except Exception as e:
         logger.error(
             f"An error occurred while applying the ghost atom modifications: {e}"
