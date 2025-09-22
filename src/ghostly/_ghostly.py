@@ -877,14 +877,13 @@ def _triple(
             import sire.morph as _morph
             from sire.units import radian as _radian
 
-            # Link properties to the appropriate end state.
-            if is_lambda1:
-                min_mol = _morph.link_to_perturbed(mol)
-            else:
-                min_mol = _morph.link_to_reference(mol)
-
             # Minimise the molecule.
-            minimiser = min_mol.minimisation(constraint="none", platform="cpu")
+            min_mol = _morph.link_to_reference(mol)
+            minimiser = min_mol.minimisation(
+                lambda_value=1.0 if is_lambda1 else 0.0,
+                constraint="none",
+                platform="cpu",
+            )
             minimiser.run()
 
             # Commit the changes.
