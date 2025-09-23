@@ -231,7 +231,7 @@ protocol_1 = BSS.Protocol.FreeEnergyProduction(
 process = BSS.Process.Somd(
     system=ejm42_ejm54,
     protocol=protocol_0,
-    no_dummy_modifications=True,
+    dummy_modifications=False,
     work_dir="somd1/no_mod/lambda_0",
 )
 process.start()
@@ -241,7 +241,7 @@ process.wait()
 process = BSS.Process.Somd(
     system=ejm42_ejm54,
     protocol=protocol_1,
-    no_dummy_modifications=True,
+    dummy_modifications=False,
     work_dir="somd1/no_mod/lambda_1",
 )
 process.start()
@@ -253,7 +253,7 @@ process.wait()
 process = BSS.Process.Somd(
     system=ejm42_ejm54_ghostly,
     protocol=protocol_0,
-    no_dummy_modifications=True,
+    dummy_modifications=False,
     work_dir="somd1/mod/lambda_0",
 )
 process.start()
@@ -263,7 +263,7 @@ process.wait()
 process = BSS.Process.Somd(
     system=ejm42_ejm54_ghostly,
     protocol=protocol_1,
-    no_dummy_modifications=True,
+    dummy_modifications=False,
     work_dir="somd1/mod/lambda_1",
 )
 process.start()
@@ -271,7 +271,7 @@ process.wait()
 ```
 
 > [!NOTE]
-> The `no_dummy_modifications=True` flag is required to disable the automatic
+> The `dummy_modifications=False` flag is required to disable the automatic
 > ghost atom handling in `SOMD1`, i.e. we want to use the terms from the
 > stream file without additional modification.
 
