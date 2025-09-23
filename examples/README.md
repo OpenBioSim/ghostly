@@ -197,8 +197,8 @@ A script is provided in the [scripts](scripts) directory to measure the angle
 of interest from the resulting trajectories:
 
 ```bash
-python scripts/measure_angle.py ejm42.prm7 ejm42.dcd 22 24 27 angles_ej42.txt
-python scripts/measure_angle.py ejm54.prm7 ejm54.dcd 22 24 26 angles_ej54.txt
+python scripts/angles.py ejm42.prm7 ejm42.dcd 22 24 27 angles_ej42.txt
+python scripts/angles.py ejm54.prm7 ejm54.dcd 22 24 26 angles_ej54.txt
 ```
 
 For `SOMD1` and `GROMACS`, we can use `BioSimSpace` to set up and run the perturbation.
@@ -279,10 +279,10 @@ Once the simulations are complete, we can measure the angle of interest
 using the provided script:
 
 ```bash
-python scripts/measure_angle.py somd1/no_mod/lambda_0/somd.prm7 somd1/no_mod/lambda_0/traj000000001.dcd 22 24 27 angles_somd1_no_mod_0.txt
-python scripts/measure_angle.py somd1/no_mod/lambda_1/somd.prm7 somd1/no_mod/lambda_1/traj000000001.dcd 22 24 27 angles_somd1_no_mod_1.txt
-python scripts/measure_angle.py somd1/mod/lambda_0/somd.prm7 somd1/mod/lambda_0/traj000000001.dcd 22 24 27 angles_somd1_mod_0.txt
-python scripts/measure_angle.py somd1/mod/lambda_1/somd.prm7 somd1/mod/lambda_1/traj000000001.dcd 22 24 27 angles_somd1_mod_1.txt
+python scripts/angles.py somd1/no_mod/lambda_0/somd.prm7 somd1/no_mod/lambda_0/traj000000001.dcd 22 24 27 angles_somd1_no_mod_0.txt
+python scripts/angles.py somd1/no_mod/lambda_1/somd.prm7 somd1/no_mod/lambda_1/traj000000001.dcd 22 24 27 angles_somd1_no_mod_1.txt
+python scripts/angles.py somd1/mod/lambda_0/somd.prm7 somd1/mod/lambda_0/traj000000001.dcd 22 24 27 angles_somd1_mod_0.txt
+python scripts/angles.py somd1/mod/lambda_1/somd.prm7 somd1/mod/lambda_1/traj000000001.dcd 22 24 27 angles_somd1_mod_1.txt
 ```
 
 > [!NOTE]
@@ -420,10 +420,10 @@ process.wait()
 Again, we can measure the angle of interest using the provided script:
 
 ```bash
-python scripts/measure_angle.py gromacs/no_mod/lambda_0/gromacs.top gromacs/no_mod/lambda_0/gromacs.xtc 22 24 27 angles_gromacs_no_mod_0.txt
-python scripts/measure_angle.py gromacs/no_mod/lambda_1/gromacs.top gromacs/no_mod/lambda_1/gromacs.xtc 22 24 27 angles_gromacs_no_mod_1.txt
-python scripts/measure_angle.py gromacs/mod/lambda_0/gromacs.top gromacs/mod/lambda_0/gromacs.xtc 22 24 27 angles_gromacs_mod_0.txt
-python scripts/measure_angle.py gromacs/mod/lambda_1/gromacs.top gromacs/mod/lambda_1/gromacs.xtc 22 24 27 angles_gromacs_mod_1.txt
+python scripts/angles.py gromacs/no_mod/lambda_0/gromacs.top gromacs/no_mod/lambda_0/gromacs.xtc 22 24 27 angles_gromacs_no_mod_0.txt
+python scripts/angles.py gromacs/no_mod/lambda_1/gromacs.top gromacs/no_mod/lambda_1/gromacs.xtc 22 24 27 angles_gromacs_no_mod_1.txt
+python scripts/angles.py gromacs/mod/lambda_0/gromacs.top gromacs/mod/lambda_0/gromacs.xtc 22 24 27 angles_gromacs_mod_0.txt
+python scripts/angles.py gromacs/mod/lambda_1/gromacs.top gromacs/mod/lambda_1/gromacs.xtc 22 24 27 angles_gromacs_mod_1.txt
 ```
 
 As before, angle distributions can be measured and visualised using another script:
@@ -462,10 +462,10 @@ somd2 ejm42_ejm54_ghostly.bss --runtime 1ns --frame-frequency 1ps --h-mass-facto
 Once again, we can measure the angle of interest using the provided script:
 
 ```bash
-python scripts/measure_angle.py somd2/no_mod/system0.prm7 somd2/no_mod/traj_0.00000.dcd 22 24 27 angles_somd2_no_mod_0.txt
-python scripts/measure_angle.py somd2/no_mod/system1.prm7 somd2/no_mod/traj_1.00000.dcd 22 24 27 angles_somd2_no_mod_1.txt
-python scripts/measure_angle.py somd2/mod/system0.prm7 somd2/mod/traj_0.00000.dcd 22 24 27 angles_somd2_mod_0.txt
-python scripts/measure_angle.py somd2/mod/system1.prm7 somd2/mod/traj_1.00000.dcd 22 24 27 angles_somd2_mod_1.txt
+python scripts/angles.py somd2/no_mod/system0.prm7 somd2/no_mod/traj_0.00000.dcd 22 24 27 angles_somd2_no_mod_0.txt
+python scripts/angles.py somd2/no_mod/system1.prm7 somd2/no_mod/traj_1.00000.dcd 22 24 27 angles_somd2_no_mod_1.txt
+python scripts/angles.py somd2/mod/system0.prm7 somd2/mod/traj_0.00000.dcd 22 24 27 angles_somd2_mod_0.txt
+python scripts/angles.py somd2/mod/system1.prm7 somd2/mod/traj_1.00000.dcd 22 24 27 angles_somd2_mod_1.txt
 ```
 
 And visualise the results:
