@@ -61,7 +61,7 @@ BSS.Align.viewMapping(ejm42, ejm54, mapping)
 In particular, we are interested in the angle formed by atom indices
 22, 24, and 27 in the left-hand ligand (ejm42). This angle is formed
 by three carbon atoms. In the right-hand ligand (ejm54), where the
-same angle is formed by indices 22, 24, and 26, the central carbon
+same angle is defined by indices 22, 24, and 26, the central carbon
 has converted to a nitrogen atom, changing the preferred angle
 from approximately 109.5 degrees to 120 degrees.
 
