@@ -1,3 +1,9 @@
+<p align="center">
+    <picture align="center">
+        <img alt="Ghostly" src="./.img/ghostly.png" width="50%"/>
+    </picture>
+</p>
+
 # Ghostly
 
 [![GitHub Actions](https://github.com/openbiosim/somd2/actions/workflows/main.yaml/badge.svg)](https://github.com/openbiosim/somd2/actions/workflows/main.yaml)
