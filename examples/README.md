@@ -3,10 +3,10 @@
 This directory contains examples demonstrating the use of `ghostly` for
 modification of bonded terms involving ghost atoms in alchemical free energy
 perturbations. To create a conda environment with the required dependencies,
-you can use the provided `environment.yml` file:
+you can use the provided `environment.yaml` file:
 
 ```bash
-conda env create -f environment.yml
+conda env create -f environment.yaml
 conda activate ghostly
 ```
 
