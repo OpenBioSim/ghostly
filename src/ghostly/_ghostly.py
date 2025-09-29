@@ -46,7 +46,7 @@ del _platform
 
 def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
     """
-    Apply Boresch modifications to ghost atom bonded terms to avoid non-physical
+    Apply modifications to ghost atom bonded terms to avoid non-physical
     coupling between the ghost atoms and the physical region.
 
     Parameters
@@ -286,7 +286,7 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
 
 def _terminal(mol, bridge, ghosts, physical, is_lambda1=False):
     r"""
-    Apply Boresch modifications to a terminal junction.
+    Apply modifications to a terminal junction.
 
     An example terminal junction with three ghost branches. Here X is the
     physical bridge atom.
@@ -325,7 +325,7 @@ def _terminal(mol, bridge, ghosts, physical, is_lambda1=False):
     """
 
     _logger.debug(
-        f"Applying Boresch modifications to terminal ghost junction at "
+        f"Applying modifications to terminal ghost junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 
@@ -387,7 +387,7 @@ def _terminal(mol, bridge, ghosts, physical, is_lambda1=False):
 
 def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
     r"""
-    Apply Boresch modifications to a dual junction.
+    Apply modifications to a dual junction.
 
     An example dual junction with two ghost branches. Here X is the physical
     bridge atom.
@@ -430,7 +430,7 @@ def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
     """
 
     _logger.debug(
-        f"Applying Boresch modifications to dual ghost junction at "
+        f"Applying modifications to dual ghost junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 
@@ -610,7 +610,7 @@ def _triple(
     is_lambda1=False,
 ):
     r"""
-    Apply Boresch modifications to a triple junction.
+    Apply modifications to a triple junction.
 
     An example triple junction. Here X is the physical bridge atom.
 
@@ -664,7 +664,7 @@ def _triple(
     """
 
     _logger.debug(
-        f"Applying Boresch modifications to triple ghost junction at "
+        f"Applying modifications to triple ghost junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 
@@ -986,7 +986,7 @@ def _higher(
     is_lambda1=False,
 ):
     r"""
-    Apply Boresch modifications to higher order junctions.
+    Apply modifications to higher order junctions.
 
     Parameters
     ----------
@@ -1030,7 +1030,7 @@ def _higher(
     """
 
     _logger.debug(
-        f"Applying Boresch modifications to higher order junction at "
+        f"Applying modifications to higher order junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 

@@ -103,14 +103,14 @@ When running the above command, you should see output similar to the following:
 2025-09-22 15:38:45.754 | DEBUG    | ghostly._ghostly:modify:192 -   ghosts: [25]
 2025-09-22 15:38:45.754 | DEBUG    | ghostly._ghostly:modify:195 -   physical: [22,26,27]
 2025-09-22 15:38:45.754 | DEBUG    | ghostly._ghostly:modify:198 -   type: 3
-2025-09-22 15:38:45.754 | DEBUG    | ghostly._ghostly:_terminal:327 - Applying Boresch modifications to terminal ghost junction at λ = 0:
+2025-09-22 15:38:45.754 | DEBUG    | ghostly._ghostly:_terminal:327 - Applying modifications to terminal ghost junction at λ = 0:
 2025-09-22 15:38:45.756 | DEBUG    | ghostly._ghostly:_terminal:375 -   Removing dihedral: [29-27-30-35], 0.155556 cos(3 phi) + 0.155556
 2025-09-22 15:38:45.756 | DEBUG    | ghostly._ghostly:_terminal:375 -   Removing dihedral: [29-27-30-36], 0.155556 cos(3 phi) + 0.155556
 2025-09-22 15:38:45.756 | DEBUG    | ghostly._ghostly:_terminal:375 -   Removing dihedral: [29-27-30-37], 0.155556 cos(3 phi) + 0.155556
 2025-09-22 15:38:45.756 | DEBUG    | ghostly._ghostly:_terminal:375 -   Removing dihedral: [28-27-30-35], 0.155556 cos(3 phi) + 0.155556
 2025-09-22 15:38:45.756 | DEBUG    | ghostly._ghostly:_terminal:375 -   Removing dihedral: [28-27-30-36], 0.155556 cos(3 phi) + 0.155556
 2025-09-22 15:38:45.756 | DEBUG    | ghostly._ghostly:_terminal:375 -   Removing dihedral: [28-27-30-37], 0.155556 cos(3 phi) + 0.155556
-2025-09-22 15:38:45.757 | DEBUG    | ghostly._ghostly:_triple:666 - Applying Boresch modifications to triple ghost junction at λ = 1:
+2025-09-22 15:38:45.757 | DEBUG    | ghostly._ghostly:_triple:666 - Applying modifications to triple ghost junction at λ = 1:
 2025-09-22 15:38:45.757 | DEBUG    | ghostly._ghostly:_triple:787 -   Non-planar junction.
 2025-09-22 15:38:45.758 | DEBUG    | ghostly._ghostly:_triple:835 -   Softening angle: [22-24-25], 46.9 [theta - 1.8984]^2 --> 0.05 [theta - 1.8984]^2
 2025-09-22 15:38:45.758 | DEBUG    | ghostly._ghostly:_triple:835 -   Softening angle: [25-24-26], 39.4 [theta - 1.87763]^2 --> 0.05 [theta - 1.87763]^2
