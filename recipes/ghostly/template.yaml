@@ -1,0 +1,81 @@
+{% set name = "ghostly" %}
+
+package:
+  name: {{ name }}
+  version: {{ environ.get('GIT_DESCRIBE_TAG', 'PR') }}
+
+source:
+  git_url: GHOSTLY_REMOTE
+  git_tag: GHOSTLY_BRANCH
+
+build:
+  number: {{ environ.get('GIT_DESCRIBE_NUMBER', 0) }}
+  noarch: python
+  script: {{ PYTHON }} -m pip install . --no-deps --ignore-installed -vv
+
+requirements:
+  host:
+    - biosimspace
+    - loguru
+    - pip
+    - python
+    - setuptools
+    - versioningit
+  run:
+    - biosimspace
+    - loguru
+    - python
+
+test:
+  script_env:
+    - SIRE_DONT_PHONEHOME
+    - SIRE_SILENT_PHONEHOME
+  requires:
+    - black == 25   # [linux and x86_64 and py==311]
+    - pytest
+    - pytest-black  # [linux and x86_64 and py==311]
+  imports:
+    - ghostly
+  source_files:
+    - src/ghostly
+    - tests
+  commands:
+    - pytest -vvv --color=yes --black src/ghostly # [linux and x86_64 and py==311]
+    - pytest -vvv --color=yes --import-mode=importlib tests
+
+about:
+  home: https://github.com/openbiosim/ghostly
+  license: GPL-3.0-or-later
+  license_file: '{{ environ["RECIPE_DIR"] }}/LICENSE'
+  summary: "Ghost atom bonded term modifications for alchemical free-energy simulations."
+  dev_url: https://github.com/openbiosim/ghostly
+  doc_url: https://github.com/openbiosim/ghostly
+  description: |
+                Ghostly is a package to perform modification of ghost (dummy) atom bonded
+                terms for alchemical free-energy calculations, using the approach described
+                in the paper "Dummy Atoms in Alchemical Free Energy Calculations" by
+                Fleck et al., JCTC, 2021, 17, 7, 4403-4419. These modifications were
+                designed to solve two key issues:
+
+                * To ensure that ghost atoms only give a multiplicative contribution to the
+                  partition function, which will cancel when computing double free-energy
+                  differences.
+                * To avoid spurious coupling between the physical and ghost systems, which
+                  can affect the equilibrium geometry of the physical system.
+
+                To install:
+
+                `conda install -c conda-forge -c openbiosim ghostly`
+
+                To install the development version:
+
+                `conda install -c conda-forge -c openbiosim/label/dev ghostly`
+
+                When updating the development version it is generally advised to
+                update Sire at the same time:
+
+                `conda install -c conda-forge -c openbiosim/label/dev ghostly sire`
+
+extra:
+  recipe-maintainers:
+    - lohedges

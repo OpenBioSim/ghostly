@@ -6,7 +6,8 @@
 
 # Ghostly
 
-[![GitHub Actions](https://github.com/openbiosim/ghostly/actions/workflows/main.yaml/badge.svg)](https://github.com/openbiosim/ghostly/actions/workflows/main.yaml)
+[![GitHub Actions](https://github.com/openbiosim/ghostly/actions/workflows/devel.yaml/badge.svg)](https://github.com/openbiosim/ghostly/actions/workflows/devel.yaml)
+[![Conda Version](https://anaconda.org/openbiosim/ghostly/badges/downloads.svg)](https://anaconda.org/openbiosim/ghostly)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 Ghostly is a package to perform modification of ghost (dummy) atom bonded
@@ -50,6 +51,20 @@ Or, for an editable install (useful for development):
 conda activate ghostly
 pip install -e .
 ```
+
+For an existing conda environment, you can also install `ghostly` directly from
+the `openbiosim` channel:
+
+```
+conda install -c conda-forge -c openbiosim ghostly
+```
+
+Or, for the development version:
+
+```
+conda install -c conda-forge -c openbiosim/label/dev ghostly
+```
+
 
 You should now have a `ghostly` executable in your path. To test, run:
 
