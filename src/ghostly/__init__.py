@@ -20,15 +20,4 @@
 # along with Ghostly. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-# Make sure we used the mixed API so we can use BioSimSpace.
-try:
-    import sire as _sr
-
-    _sr.use_mixed_api(support_old_module_names=False)
-    _sr.convert.supported_formats()
-
-    del _sr
-except ImportError:
-    pass
-
 from ._ghostly import *
