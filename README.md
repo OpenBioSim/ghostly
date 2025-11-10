@@ -6,7 +6,7 @@
 
 # Ghostly
 
-[![GitHub Actions](https://github.com/openbiosim/ghostly/actions/workflows/main.yaml/badge.svg)](https://github.com/openbiosim/ghostly/actions/workflows/devel.yaml)
+[![GitHub Actions](https://github.com/openbiosim/ghostly/actions/workflows/devel.yaml/badge.svg)](https://github.com/openbiosim/ghostly/actions/workflows/devel.yaml)
 [![Conda Version](https://anaconda.org/openbiosim/ghostly/badges/downloads.svg)](https://anaconda.org/openbiosim/ghostly)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
