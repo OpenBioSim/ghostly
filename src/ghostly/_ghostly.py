@@ -761,6 +761,136 @@ def _triple(
             else:
                 new_angles.set(idx0, idx1, idx2, p.function())
 
+        # Next, remove all dihedral starting from the ghost atoms and ending in
+        # the physical system. Also, only preserve dihedrals terminating at one
+        # of the physical atoms.
+
+        # Get the end state dihedral functions.
+        dihedrals = mol.property("dihedral" + suffix)
+
+        # Initialise containers to store the updated dihedral functions.
+        new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+
+        for p in dihedrals.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
+            idx3 = info.atom_idx(p.atom3())
+            idxs = [idx0, idx1, idx2, idx3]
+
+            # If there is one ghost atom, then this dihedral must begin or terminate
+            # at the ghost atom.
+            num_ghosts = len([x for x in idxs if x in ghosts])
+            if num_ghosts == 1:
+                _logger.debug(
+                    f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
+                )
+            # Remove the dihedral if includes a ghost and doesn't terminate at the first
+            # physical atom.
+            elif (_is_ghost(mol, [idx0], is_lambda1)[0] and idx3 in physical[1:]) or (
+                _is_ghost(mol, [idx3], is_lambda1)[0] and idx0 in physical[1:]
+            ):
+                _logger.debug(
+                    f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
+                )
+            else:
+                new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+        # Update the molecule.
+        mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
+
+        # Optimise the equilibrium value of theta0 for the softened angle terms.
+        if optimise_angles:
+            _logger.debug("  Optimising equilibrium values for softened angles.")
+
+            from sire.units import radian as _radian
+
+            # Initialise the equilibrium angle values.
+            theta0s = {}
+            for idx in angle_idxs:
+                theta0s[idx] = []
+
+            # Perform multiple minimisations to get an average for the theta0 values.
+            for _ in range(num_optimise):
+                # Minimise the molecule.
+                min_mol = _morph.link_to_reference(mol)
+                minimiser = min_mol.minimisation(
+                    lambda_value=1.0 if is_lambda1 else 0.0,
+                    constraint="none",
+                    platform="cpu",
+                )
+                minimiser.run()
+
+                # Commit the changes.
+                min_mol = minimiser.commit()
+
+                # Get the equilibrium angle values.
+                for idx in angle_idxs:
+                    try:
+                        theta0s[idx].append(min_mol.angles(*idx).sizes()[0].to(_radian))
+                    except:
+                        raise ValueError(f"Could not find optimised angle term: {idx}")
+
+            # Compute the mean and standard error.
+            import numpy as _np
+
+            theta0_means = {}
+            theta0_stds = {}
+            for idx in theta0s:
+                theta0_means[idx] = _np.mean(theta0s[idx])
+                theta0_stds[idx] = _np.std(theta0s[idx]) / _np.sqrt(len(theta0s[idx]))
+
+            # Get the existing angles.
+            angles = mol.property("angle" + suffix)
+
+            # Initialise a container to store the updated angle functions.
+            new_angles = _SireMM.ThreeAtomFunctions(mol.info())
+
+            # Update the angle potentials.
+            for p in angles.potentials():
+                idx0 = info.atom_idx(p.atom0())
+                idx1 = info.atom_idx(p.atom1())
+                idx2 = info.atom_idx(p.atom2())
+                idx = (idx0, idx1, idx2)
+
+                # This is the softened angle term.
+                if idx in angle_idxs:
+                    # Get the optimised equilibrium angle.
+                    theta0 = theta0_means[idx]
+                    std = theta0_stds[idx]
+
+                    # Create the new angle function.
+                    amber_angle = _SireMM.AmberAngle(k_soft, theta0)
+
+                    # Generate the new angle expression.
+                    expression = amber_angle.to_expression(Symbol("theta"))
+
+                    # Set the equilibrium angle to 90 degrees.
+                    new_angles.set(idx0, idx1, idx2, expression)
+
+                    _logger.debug(
+                        f"  Optimising angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                        f"{p.function()} --> {expression} (std err: {std:.3f} radian)"
+                    )
+
+                else:
+                    new_angles.set(idx0, idx1, idx2, p.function())
+
+            # Update the molecule.
+            mol = (
+                mol.edit()
+                .set_property("angle" + suffix, new_angles)
+                .molecule()
+                .commit()
+            )
+
+    # Planar junction.
     else:
         _logger.debug("  Planar junction.")
 
