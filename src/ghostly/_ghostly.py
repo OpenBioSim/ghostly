@@ -875,7 +875,7 @@ def _triple(
                     new_angles.set(idx0, idx1, idx2, expression)
 
                     _logger.debug(
-                        f"  Optimising angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                        f"  Optimised angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
                         f"{p.function()} --> {expression} (std err: {std:.3f} radian)"
                     )
 
