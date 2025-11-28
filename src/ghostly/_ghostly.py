@@ -1065,10 +1065,50 @@ def _higher(
     except:
         connectivity = mol.property("connectivity")
 
+    # First loop over all of the physical atoms connected to the bridge atom
+    # to determine whether any aren't bonded to ghost atoms. This avoids
+    # removing angle and dihedral terms when it's not necessary.
+
+    # Count of disconnected physical atoms.
+    num_disconnected = 0
+
+    for idx in physical:
+        # Get the angles and dihedrals.
+        angles = mol.property("angle" + suffix)
+        dihedrals = mol.property("dihedral" + suffix)
+
+        connected_to_ghost = False
+
+        # Angles.
+        for p in angles.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
+
+            if idx == idx0 and idx2 in ghosts or idx == idx2 and idx0 in ghosts:
+                connected_to_ghost = True
+                break
+
+        # Dihedrals.
+        if not connected_to_ghost:
+            for p in dihedrals.potentials():
+                idx0 = info.atom_idx(p.atom0())
+                idx1 = info.atom_idx(p.atom1())
+                idx2 = info.atom_idx(p.atom2())
+                idx3 = info.atom_idx(p.atom3())
+                idxs = [idx0, idx1, idx2, idx3]
+
+                if idx in idxs and any([x in ghosts for x in idxs]):
+                    connected_to_ghost = True
+                    break
+
+        if not connected_to_ghost:
+            num_disconnected += 1
+
     # Now remove all bonded interactions between the ghost atoms and one of the
     # physical atoms connected to the bridge atom, hence reducing the problem to
     # that of a triple junction.
-    while len(physical) > 3:
+    while len(physical) - num_disconnected > 3:
         # Pop the first physical atom index from the list.
         idx = physical.pop(0)
 
