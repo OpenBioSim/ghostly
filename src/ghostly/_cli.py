@@ -51,10 +51,10 @@ def run():
     parser.add_argument(
         "--system",
         type=str,
-        help=(
-            "Stream file for the perturbable system. This takes precedence over ",
-            "the reference and perturbed molecule files.",
-        ),
+        help="""
+             Stream file for the perturbable system. This takes precedence over
+             the reference and perturbed molecule files.
+             """,
         nargs=1,
         required=False,
     )
@@ -78,13 +78,13 @@ def run():
     parser.add_argument(
         "--mapping",
         type=str,
-        help=(
-            "Mapping between atoms in the reference and perturbed molecules. "
-            "If omitted, the mapping will be determined automatically. The mapping "
-            "should be a string representing a dictionary where the keys are the "
-            "indices of the atoms in the reference molecule and the values are "
-            "the indices of the atoms in the perturbed molecule."
-        ),
+        help="""
+             Mapping between atoms in the reference and perturbed molecules.
+             If omitted, the mapping will be determined automatically. The mapping
+             should be a string representing a dictionary where the keys are the
+             indices of the atoms in the reference molecule and the values are
+             the indices of the atoms in the perturbed molecule.
+             """,
         default=None,
         required=False,
     )
@@ -92,10 +92,10 @@ def run():
     parser.add_argument(
         "--k-hard",
         type=str,
-        help=(
-            "The force constant to use to when setting angle terms involving ghost "
-            "atoms to 90 degrees to avoid flapping."
-        ),
+        help="""
+             The force constant to use to when setting angle terms involving ghost
+             atoms to 90 degrees to avoid flapping.
+             """,
         default="100 kcal/mol/rad**2",
         required=False,
     )
@@ -103,10 +103,10 @@ def run():
     parser.add_argument(
         "--k-soft",
         type=str,
-        help=(
-            "The force constant to use when setting angle terms involving ghost atoms "
-            "for non-planar triple junctions."
-        ),
+        help="""
+             The force constant to use when setting angle terms involving ghost atoms
+             for non-planar triple junctions.
+             """,
         default="5 kcal/mol/rad**2",
         required=False,
     )
@@ -114,10 +114,10 @@ def run():
     parser.add_argument(
         "--optimise-angles",
         action=argparse.BooleanOptionalAction,
-        help=(
-            "Whether to optimise the equilibrium value of the angle terms involving "
-            "ghost atoms for non-planar triple junctions."
-        ),
+        help="""
+             Whether to optimise the equilibrium value of the angle terms involving
+             ghost atoms for non-planar triple junctions.
+             """,
         default=True,
         required=False,
     )
@@ -125,10 +125,10 @@ def run():
     parser.add_argument(
         "--num-optimise",
         type=int,
-        help=(
-            "The number of repeats to use when optimising the angle terms involving "
-            "ghost atoms for non-planar triple junctions."
-        ),
+        help="""
+             The number of repeats to use when optimising the angle terms involving
+             ghost atoms for non-planar triple junctions.
+             """,
         default=10,
         required=False,
     )
