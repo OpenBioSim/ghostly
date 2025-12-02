@@ -78,6 +78,9 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
     system : sire.system.System
         The updated system.
 
+    modifications : dict
+        A dictionary containing details of the modifications made.
+
     Notes
     -----
 
@@ -103,6 +106,23 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
         pert_mols = system.molecules("property is_perturbable")
     except KeyError:
         raise KeyError("No perturbable molecules in the system")
+
+    # Create the modifications dictionary.
+    modifications = {}
+
+    # Initialise the containers in the modifications dictionary.
+    modifications["lambda_0"] = {
+        "removed_angles": [],
+        "removed_dihedrals": [],
+        "stiffened_angles": [],
+        "softened_angles": {},
+    }
+    modifications["lambda_1"] = {
+        "removed_angles": [],
+        "removed_dihedrals": [],
+        "stiffened_angles": [],
+        "softened_angles": {},
+    }
 
     for mol in pert_mols:
         # Store the molecule info.
@@ -206,11 +226,21 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
 
             # Terminal junction.
             if junction == 1:
-                mol = _terminal(mol, b, bridges0[b], physical0[b])
+                mol = _terminal(
+                    mol, b, bridges0[b], physical0[b], connectivity0, modifications
+                )
 
             # Dual junction.
             elif junction == 2:
-                mol = _dual(mol, b, bridges0[b], physical0[b], k_hard=k_hard)
+                mol = _dual(
+                    mol,
+                    b,
+                    bridges0[b],
+                    physical0[b],
+                    connectivity0,
+                    modifications,
+                    k_hard=k_hard,
+                )
 
             # Triple junction.
             elif junction == 3:
@@ -219,6 +249,8 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     b,
                     bridges0[b],
                     physical0[b],
+                    connectivity0,
+                    modifications,
                     k_hard=k_hard,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
@@ -232,6 +264,8 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     b,
                     bridges0[b],
                     physical0[b],
+                    connectivity0,
+                    modifications,
                     k_hard=k_hard,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
@@ -243,11 +277,26 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
             junction = len(physical1[b])
 
             if junction == 1:
-                mol = _terminal(mol, b, bridges1[b], physical1[b], is_lambda1=True)
+                mol = _terminal(
+                    mol,
+                    b,
+                    bridges1[b],
+                    physical1[b],
+                    connectivity1,
+                    modifications,
+                    is_lambda1=True,
+                )
 
             elif junction == 2:
                 mol = _dual(
-                    mol, b, bridges1[b], physical1[b], k_hard=k_hard, is_lambda1=True
+                    mol,
+                    b,
+                    bridges1[b],
+                    physical1[b],
+                    connectivity1,
+                    modifications,
+                    k_hard=k_hard,
+                    is_lambda1=True,
                 )
 
             elif junction == 3:
@@ -256,6 +305,8 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     b,
                     bridges1[b],
                     physical1[b],
+                    connectivity1,
+                    modifications,
                     k_hard=k_hard,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
@@ -270,6 +321,8 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     b,
                     bridges1[b],
                     physical1[b],
+                    connectivity1,
+                    modifications,
                     k_hard=k_hard,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
@@ -281,10 +334,12 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
         system.update(mol)
 
     # Return the updated system.
-    return system
+    return system, modifications
 
 
-def _terminal(mol, bridge, ghosts, physical, is_lambda1=False):
+def _terminal(
+    mol, bridge, ghosts, physical, connectivity, modifications, is_lambda1=False
+):
     r"""
     Apply modifications to a terminal junction.
 
@@ -314,6 +369,12 @@ def _terminal(mol, bridge, ghosts, physical, is_lambda1=False):
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
 
+    connectivity : sire.legacy.MM.Connectivity
+        The connectivity of the molecule at the relevant end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
     is_lambda1 : bool, optional
         Whether the junction is at lambda = 1.
 
@@ -334,9 +395,9 @@ def _terminal(mol, bridge, ghosts, physical, is_lambda1=False):
 
     # Get the end state connectivity property.
     if is_lambda1:
-        connectivity = _create_connectivity(_morph.link_to_perturbed(mol))
+        mod_key = "lambda_1"
     else:
-        connectivity = _create_connectivity(_morph.link_to_reference(mol))
+        mod_key = "lambda_0"
 
     # First, we need to work out the physical atoms two atoms away from the
     # bridge atom.
@@ -375,6 +436,9 @@ def _terminal(mol, bridge, ghosts, physical, is_lambda1=False):
             _logger.debug(
                 f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
             )
+            dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+            dih_idx = ",".join([str(i) for i in dih_idx])
+            modifications[mod_key]["removed_dihedrals"].append(dih_idx)
         else:
             new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
@@ -385,7 +449,16 @@ def _terminal(mol, bridge, ghosts, physical, is_lambda1=False):
     return mol
 
 
-def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
+def _dual(
+    mol,
+    bridge,
+    ghosts,
+    physical,
+    connectivity,
+    modifications,
+    k_hard=100,
+    is_lambda1=False,
+):
     r"""
     Apply modifications to a dual junction.
 
@@ -415,6 +488,12 @@ def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
 
+    connectivity : sire.legacy.MM.Connectivity
+        The connectivity of the molecule at the relevant end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
     k_hard : float, optional
         The force constant to use when setting angle terms involving ghost
         atoms to 90 degrees to avoid flapping. (In kcal/mol/rad^2)
@@ -437,14 +516,13 @@ def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
     # Store the molecular info.
     info = mol.info()
 
-    # Property suffix based on the end state.
-    suffix = "0" if not is_lambda1 else "1"
-
     # Get the end state connectivity property.
-    try:
-        connectivity = mol.property("connectivity" + suffix)
-    except:
-        connectivity = mol.property("connectivity")
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
 
     # Single branch.
     if len(ghosts) == 1:
@@ -477,6 +555,9 @@ def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
+                dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+                dih_idx = ",".join([str(i) for i in dih_idx])
+                modifications[mod_key]["removed_dihedrals"].append(dih_idx)
             # Dihedral terminates at the second physical atom.
             elif (_is_ghost(mol, [idx0], is_lambda1)[0] and idx3 == physical[1]) or (
                 _is_ghost(mol, [idx3], is_lambda1)[0] and idx0 == physical[1]
@@ -484,6 +565,9 @@ def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
+                dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+                dih_idx = ",".join([str(i) for i in dih_idx])
+                modifications[mod_key]["removed_dihedrals"].append(dih_idx)
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
@@ -519,6 +603,9 @@ def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
                     f"  Stiffening angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
                     f"{p.function()} --> {expression}"
                 )
+
+                ang_idx = (idx0.value(), idx1.value(), idx2.value())
+                modifications[mod_key]["stiffened_angles"].append(ang_idx)
 
             else:
                 new_angles.set(idx0, idx1, idx2, p.function())
@@ -556,7 +643,9 @@ def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
                 _logger.debug(
                     f"  Removing angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
                 )
-
+                ang_idx = (idx0.value(), idx1.value(), idx2.value())
+                ang_idx = ",".join([str(i) for i in ang_idx])
+                modifications[mod_key]["removed_angles"].append(ang_idx)
             else:
                 new_angles.set(idx0, idx1, idx2, p.function())
 
@@ -576,6 +665,9 @@ def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
+                dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+                dih_idx = ",".join([str(i) for i in dih_idx])
+                modifications[mod_key]["removed_dihedrals"].append(dih_idx)
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
@@ -591,7 +683,14 @@ def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
         # Now treat the ghost branches individually.
         for d in ghosts:
             mol = _dual(
-                mol, bridge, [d], physical, k_hard=k_hard, is_lambda1=is_lambda1
+                mol,
+                bridge,
+                [d],
+                physical,
+                connectivity,
+                modifications,
+                k_hard=k_hard,
+                is_lambda1=is_lambda1,
             )
 
     # Return the updated molecule.
@@ -603,6 +702,8 @@ def _triple(
     bridge,
     ghosts,
     physical,
+    connectivity,
+    modifications,
     k_hard=100,
     k_soft=5,
     optimise_angles=True,
@@ -636,6 +737,12 @@ def _triple(
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
+
+    connectivity : sire.legacy.MM.Connectivity
+        The connectivity of the molecule at the relevant end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
 
     k_hard : float, optional
         The force constant to use when setting angle terms involving ghost
@@ -671,20 +778,15 @@ def _triple(
     # Store the molecular info.
     info = mol.info()
 
-    # Property suffix based on the end state.
-    suffix = "0" if not is_lambda1 else "1"
-
-    # Get the end state connectivity property.
-    try:
-        connectivity = mol.property("connectivity" + suffix)
-    except:
-        connectivity = mol.property("connectivity")
-
     # Link the molecule to the desired end state.
     if is_lambda1:
         end_state_mol = _morph.link_to_perturbed(mol)
+        mod_key = "lambda_1"
+        suffix = "1"
     else:
         end_state_mol = _morph.link_to_reference(mol)
+        mod_key = "lambda_0"
+        suffix = "0"
 
     from rdkit.Chem import HybridizationType
     from sire.convert import to_rdkit
@@ -758,6 +860,9 @@ def _triple(
                     f"{p.function()} --> {expression}"
                 )
 
+                ang_idx = ",".join([str(i.value()) for i in (idx0, idx1, idx2)])
+                modifications[mod_key]["softened_angles"][ang_idx] = {"k": k_soft}
+
             else:
                 new_angles.set(idx0, idx1, idx2, p.function())
 
@@ -785,6 +890,9 @@ def _triple(
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
+                dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+                dih_idx = ",".join([str(i) for i in dih_idx])
+                modifications[mod_key]["removed_dihedrals"].append(dih_idx)
             # Remove the dihedral if includes a ghost and doesn't terminate at the first
             # physical atom.
             elif (_is_ghost(mol, [idx0], is_lambda1)[0] and idx3 in physical[1:]) or (
@@ -793,6 +901,9 @@ def _triple(
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
+                dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+                dih_idx = ",".join([str(i) for i in dih_idx])
+                modifications[mod_key]["removed_dihedrals"].append(dih_idx)
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
@@ -879,6 +990,12 @@ def _triple(
                         f"{p.function()} --> {expression} (std err: {std:.3f} radian)"
                     )
 
+                    ang_idx = ",".join([str(i.value()) for i in idx])
+                    modifications[mod_key]["softened_angles"][ang_idx] = {
+                        "k": k_soft,
+                        "theta0": theta0,
+                    }
+
                 else:
                     new_angles.set(idx0, idx1, idx2, p.function())
 
@@ -919,6 +1036,9 @@ def _triple(
                 _logger.debug(
                     f"  Removing angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
                 )
+                ang_idx = (idx0.value(), idx1.value(), idx2.value())
+                ang_idx = ",".join([str(i) for i in ang_idx])
+                modifications[mod_key]["removed_angles"].append(ang_idx)
 
             else:
                 new_angles.set(idx0, idx1, idx2, p.function())
@@ -935,6 +1055,9 @@ def _triple(
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
+                dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+                dih_idx = ",".join([str(i) for i in dih_idx])
+                modifications[mod_key]["removed_dihedrals"].append(dih_idx)
 
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
@@ -972,6 +1095,9 @@ def _triple(
                     f"{p.function()} --> {expression}"
                 )
 
+                ang_idx = (idx0.value(), idx1.value(), idx2.value())
+                modifications[mod_key]["stiffened_angles"].append(ang_idx)
+
             else:
                 new_new_angles.set(idx0, idx1, idx2, p.function())
 
@@ -998,6 +1124,8 @@ def _higher(
     bridge,
     ghosts,
     physical,
+    connectivity,
+    modifications,
     k_hard=100,
     k_soft=5,
     optimise_angles=True,
@@ -1021,6 +1149,12 @@ def _higher(
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
+
+    connectivity : sire.legacy.MM.Connectivity
+        The connectivity of the molecule at the relevant end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
 
     k_hard : float, optional
         The force constant to use when setting angle terms involving ghost
@@ -1056,14 +1190,13 @@ def _higher(
     # Store the molecular info.
     info = mol.info()
 
-    # Property suffix based on the end state.
-    suffix = "0" if not is_lambda1 else "1"
-
     # Get the end state connectivity property.
-    try:
-        connectivity = mol.property("connectivity" + suffix)
-    except:
-        connectivity = mol.property("connectivity")
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
 
     # First loop over all of the physical atoms connected to the bridge atom
     # to determine whether any aren't bonded to ghost atoms. This avoids
@@ -1130,6 +1263,9 @@ def _higher(
                 _logger.debug(
                     f"  Removing angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
                 )
+                ang_idx = (idx0.value(), idx1.value(), idx2.value())
+                ang_idx = ",".join([str(i) for i in ang_idx])
+                modifications[mod_key]["removed_angles"].append(ang_idx)
             else:
                 new_angles.set(idx0, idx1, idx2, p.function())
 
@@ -1145,6 +1281,9 @@ def _higher(
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
+                dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+                dih_idx = ",".join([str(i) for i in dih_idx])
+                modifications[mod_key]["removed_dihedrals"].append(dih_idx)
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
@@ -1163,6 +1302,8 @@ def _higher(
         bridge,
         ghosts,
         physical,
+        connectivity,
+        modifications,
         k_hard=k_hard,
         k_soft=k_soft,
         optimise_angles=optimise_angles,

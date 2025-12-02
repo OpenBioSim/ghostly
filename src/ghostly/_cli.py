@@ -35,6 +35,7 @@ def run():
     from loguru import logger
 
     import argparse
+    import json
     import os
     import sys
 
@@ -268,7 +269,7 @@ def run():
     try:
         if args.system is None:
             system = merged.toSystem()._sire_object
-        system = modify(
+        system, modifications = modify(
             system,
             k_hard.value(),
             k_soft.value(),
@@ -307,3 +308,11 @@ def run():
             sys.exit(1)
     else:
         sr.stream.save(system, f"{args.output_prefix}.bss")
+
+    # Try to save the modifications to JSON.
+    try:
+        with open(f"{args.output_prefix}_modifications.json", "w") as f:
+            json.dump(modifications, f, indent=4)
+    except Exception as e:
+        logger.error(f"An error occurred while saving the modifications to JSON: {e}")
+        sys.exit(1)
