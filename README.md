@@ -104,8 +104,6 @@ use the stream file with [BioSimSpace](https://biosimspace.openbiosim.org) to ge
 required input files. Additionally, the program will output a JSON file summarising the
 modifications that were made.
 
-```bash
-
 > [!NOTE]
 > When a stream file is used as input, the `--mapping` option is ignored. and
 > the output will always be a stream file, regardless of the `--output-format` option.
