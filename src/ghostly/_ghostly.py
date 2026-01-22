@@ -255,6 +255,7 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     b,
                     bridges0[b],
                     physical0[b],
+                    connectivity0,
                     modifications,
                     k_hard=k_hard,
                     k_soft=k_soft,
@@ -310,6 +311,7 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     b,
                     bridges1[b],
                     physical1[b],
+                    connectivity1,
                     modifications,
                     k_hard=k_hard,
                     k_soft=k_soft,
@@ -706,6 +708,7 @@ def _triple(
     bridge,
     ghosts,
     physical,
+    connectivity,
     modifications,
     k_hard=100,
     k_soft=5,
@@ -740,6 +743,9 @@ def _triple(
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
+
+    connectivity : sire.legacy.MM.Connectivity
+        The connectivity of the molecule at the relevant end state.
 
     modifications : dict
         A dictionary to store details of the modifications made.
@@ -1062,57 +1068,25 @@ def _triple(
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
-        # Next we modify the angle terms between the remaining physical and
-        # ghost atoms so that the equilibrium angle is 90 degrees.
-        new_new_angles = _SireMM.ThreeAtomFunctions(mol.info())
-        for p in new_angles.potentials():
-            idx0 = info.atom_idx(p.atom0())
-            idx1 = info.atom_idx(p.atom1())
-            idx2 = info.atom_idx(p.atom2())
-
-            if (
-                idx0 in ghosts
-                and idx2 in physical[1:]
-                or idx0 in physical[1:]
-                and idx2 in ghosts
-            ):
-                from math import pi
-                from sire.legacy.CAS import Symbol
-
-                theta0 = pi / 2.0
-
-                # Create the new angle function.
-                amber_angle = _SireMM.AmberAngle(k_hard, theta0)
-
-                # Generate the new angle expression.
-                expression = amber_angle.to_expression(Symbol("theta"))
-
-                # Set the equilibrium angle to 90 degrees.
-                new_new_angles.set(idx0, idx1, idx2, expression)
-
-                _logger.debug(
-                    f"  Stiffening angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
-                    f"{p.function()} --> {expression}"
-                )
-
-                ang_idx = (idx0.value(), idx1.value(), idx2.value())
-                modifications[mod_key]["stiffened_angles"].append(ang_idx)
-
-            else:
-                new_new_angles.set(idx0, idx1, idx2, p.function())
-
         # Update the molecule.
-        mol = (
-            mol.edit()
-            .set_property("angle" + suffix, new_new_angles)
-            .molecule()
-            .commit()
-        )
+        mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
         mol = (
             mol.edit()
             .set_property("dihedral" + suffix, new_dihedrals)
             .molecule()
             .commit()
+        )
+
+        # Next we treat the remaining terms as a dual junction.
+        mol = _dual(
+            mol,
+            bridge,
+            ghosts,
+            physical[1:],
+            connectivity,
+            modifications,
+            k_hard=k_hard,
+            is_lambda1=is_lambda1,
         )
 
     # Return the updated molecule.
@@ -1302,6 +1276,7 @@ def _higher(
         bridge,
         ghosts,
         physical,
+        connectivity,
         modifications,
         k_hard=k_hard,
         k_soft=k_soft,
