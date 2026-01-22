@@ -168,7 +168,10 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
         for b in bridges0:
             physical0[b] = []
             for c in connectivity0.connections_to(b):
-                if not _is_ghost(mol, [c])[0]:
+                if (
+                    not _is_ghost(mol, [c])[0]
+                    and not _is_ghost(mol, [c], is_lambda1=True)[0]
+                ):
                     physical0[b].append(c)
         for b in physical0:
             physical0[b].sort(key=lambda x: x.value())
@@ -186,7 +189,10 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
         for b in bridges1:
             physical1[b] = []
             for c in connectivity1.connections_to(b):
-                if not _is_ghost(mol, [c], is_lambda1=True)[0]:
+                if (
+                    not _is_ghost(mol, [c])[0]
+                    and not _is_ghost(mol, [c], is_lambda1=True)[0]
+                ):
                     physical1[b].append(c)
         for b in physical1:
             physical1[b].sort(key=lambda x: x.value())
