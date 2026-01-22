@@ -249,7 +249,6 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     b,
                     bridges0[b],
                     physical0[b],
-                    connectivity0,
                     modifications,
                     k_hard=k_hard,
                     k_soft=k_soft,
@@ -305,7 +304,6 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     b,
                     bridges1[b],
                     physical1[b],
-                    connectivity1,
                     modifications,
                     k_hard=k_hard,
                     k_soft=k_soft,
@@ -702,7 +700,6 @@ def _triple(
     bridge,
     ghosts,
     physical,
-    connectivity,
     modifications,
     k_hard=100,
     k_soft=5,
@@ -737,9 +734,6 @@ def _triple(
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
-
-    connectivity : sire.legacy.MM.Connectivity
-        The connectivity of the molecule at the relevant end state.
 
     modifications : dict
         A dictionary to store details of the modifications made.
@@ -1302,7 +1296,6 @@ def _higher(
         bridge,
         ghosts,
         physical,
-        connectivity,
         modifications,
         k_hard=k_hard,
         k_soft=k_soft,
