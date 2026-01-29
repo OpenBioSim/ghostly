@@ -31,7 +31,7 @@ import sire.morph as _morph
 
 try:
     from somd2 import _logger
-except:
+except Exception:
     from loguru import logger as _logger
 
 import platform as _platform
@@ -940,6 +940,8 @@ def _triple(
                 theta0s[idx] = []
 
             # Perform multiple minimisations to get an average for the theta0 values.
+            is_error = False
+            num_errors = 0
             for _ in range(num_optimise):
                 # Minimise the molecule.
                 min_mol = _morph.link_to_reference(mol)
@@ -948,7 +950,11 @@ def _triple(
                     constraint="none",
                     platform="cpu",
                 )
-                minimiser.run()
+                try:
+                    minimiser.run()
+                except Exception:
+                    is_error = True
+                    num_errors += 1
 
                 # Commit the changes.
                 min_mol = minimiser.commit()
@@ -957,8 +963,14 @@ def _triple(
                 for idx in angle_idxs:
                     try:
                         theta0s[idx].append(min_mol.angles(*idx).sizes()[0].to(_radian))
-                    except:
+                    except Exception:
                         raise ValueError(f"Could not find optimised angle term: {idx}")
+
+            if is_error:
+                _logger.warning(
+                    f"    {num_errors} minimisation(s) failed to converge during "
+                    f"angle optimisation at {_lam_sym} = {int(is_lambda1)}."
+                )
 
             # Compute the mean and standard error.
             import numpy as _np
