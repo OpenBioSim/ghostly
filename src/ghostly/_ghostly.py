@@ -278,6 +278,9 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     num_optimise=num_optimise,
                 )
 
+            # Remove any improper dihedrals connecting ghosts to the physical region.
+            mol = _remove_impropers(mol, ghosts0, modifications, is_lambda1=True)
+
         # Now lambda = 1.
         for b in bridges1:
             junction = len(physical1[b])
@@ -335,6 +338,9 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     num_optimise=num_optimise,
                     is_lambda1=True,
                 )
+
+            # Remove any improper dihedrals connecting ghosts to the physical region.
+            mol = _remove_impropers(mol, ghosts1, modifications, is_lambda1=True)
 
         # Update the molecule in the system.
         system.update(mol)
@@ -1284,6 +1290,72 @@ def _higher(
         num_optimise=num_optimise,
         is_lambda1=is_lambda1,
     )
+
+
+def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
+    """
+    Remove improper dihedral terms that bridge the ghost and physical systems.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to remove the improper dihedrals at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    # Store the molecular info.
+    info = mol.info()
+
+    # Get the end state bond functions.
+    suffix = "1" if is_lambda1 else "0"
+    impropers = mol.property("improper" + suffix)
+
+    # Initialise a container to store the updated bonded terms.
+    new_impropers = _SireMM.FourAtomFunctions(mol.info())
+
+    # Loop over the improper dihedrals.
+    for p in impropers.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        # Remove any improper dihedrals that bridge the ghost and physical systems.
+        if not all(idx in ghosts for idx in (idx0, idx1, idx2, idx3)) and any(
+            idx in ghosts for idx in (idx0, idx1, idx2, idx3)
+        ):
+            _logger.debug(
+                f"  Removing improper dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
+            )
+            dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+            dih_idx = ",".join([str(i) for i in dih_idx])
+            key = "lambda_1" if is_lambda1 else "lambda_0"
+            modifications[key]["removed_dihedrals"].append(dih_idx)
+        else:
+            new_impropers.set(idx0, idx1, idx2, idx3, p.function())
+
+    # Set the updated impropers.
+    mol = (
+        mol.edit().set_property("improper" + suffix, new_impropers).molecule().commit()
+    )
+
+    # Return the updated molecule.
+    return mol
 
 
 def _create_connectivity(mol):
