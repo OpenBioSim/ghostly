@@ -125,9 +125,6 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
     }
 
     for mol in pert_mols:
-        # Store the molecule info.
-        info = mol.info()
-
         # Generate the end state connectivity objects.
         connectivity0 = _create_connectivity(_morph.link_to_reference(mol))
         connectivity1 = _create_connectivity(_morph.link_to_perturbed(mol))
