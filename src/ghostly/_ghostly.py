@@ -279,7 +279,7 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                 )
 
             # Remove any improper dihedrals connecting ghosts to the physical region.
-            mol = _remove_impropers(mol, ghosts0, modifications, is_lambda1=True)
+            mol = _remove_impropers(mol, ghosts0, modifications, is_lambda1=False)
 
         # Now lambda = 1.
         for b in bridges1:
