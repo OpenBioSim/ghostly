@@ -693,11 +693,11 @@ def _dual(
         )
 
         # Now treat the ghost branches individually.
-        for d in ghosts:
+        for ghost in ghosts:
             mol = _dual(
                 mol,
                 bridge,
-                [d],
+                [ghost],
                 physical,
                 connectivity,
                 modifications,
