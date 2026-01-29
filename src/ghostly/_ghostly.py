@@ -635,7 +635,7 @@ def _dual(
     else:
         _logger.debug("  Dual branch:")
 
-        # First, delete all bonded terms between atoms in two ghost branches.
+        # First, delete all bonded terms between atoms in the two ghost branches.
 
         # Get the end state bond functions.
         angles = mol.property("angle" + suffix)
