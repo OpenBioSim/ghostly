@@ -938,7 +938,6 @@ def _triple(
 
             # Perform multiple minimisations to get an average for the theta0 values.
             is_error = False
-            num_errors = 0
             for _ in range(num_optimise):
                 # Minimise the molecule.
                 min_mol = _morph.link_to_reference(mol)
@@ -951,7 +950,6 @@ def _triple(
                     minimiser.run()
                 except Exception:
                     is_error = True
-                    num_errors += 1
 
                 # Commit the changes.
                 min_mol = minimiser.commit()
@@ -963,11 +961,11 @@ def _triple(
                     except Exception:
                         raise ValueError(f"Could not find optimised angle term: {idx}")
 
-            if is_error:
-                _logger.warning(
-                    f"    {num_errors} minimisation(s) failed to converge during "
-                    f"angle optimisation at {_lam_sym} = {int(is_lambda1)}."
-                )
+                if is_error:
+                    _logger.warning(
+                        "Minimisation failed to converge during angle optimisation."
+                    )
+                    break
 
             # Compute the mean and standard error.
             import numpy as _np
