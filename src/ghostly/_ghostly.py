@@ -160,7 +160,8 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     else:
                         bridges0[c].append(ghost)
         # Work out the indices of the other physical atoms that are connected to
-        # the bridge atoms, sorted by the atom index.
+        # the bridge atoms, sorted by the atom index. These are "core" physical
+        # atoms, i.e. they are physical in both end states.
         physical0 = {}
         for b in bridges0:
             physical0[b] = []
