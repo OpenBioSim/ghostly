@@ -279,6 +279,16 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
             # Remove any improper dihedrals connecting ghosts to the physical region.
             mol = _remove_impropers(mol, ghosts0, modifications, is_lambda1=False)
 
+        # Remove any residual ghost dihedrals not caught by the per-bridge
+        # junction handlers (cross-bridge and ghost-middle patterns).
+        mol = _remove_residual_ghost_dihedrals(
+            mol, ghosts0, modifications, is_lambda1=False
+        )
+
+        # Remove any angles where the central atom is ghost and both terminal
+        # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
+        mol = _remove_ghost_centre_angles(mol, ghosts0, modifications, is_lambda1=False)
+
         # Now lambda = 1.
         for b in bridges1:
             junction = len(physical1[b])
@@ -339,6 +349,16 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
 
             # Remove any improper dihedrals connecting ghosts to the physical region.
             mol = _remove_impropers(mol, ghosts1, modifications, is_lambda1=True)
+
+        # Remove any residual ghost dihedrals not caught by the per-bridge
+        # junction handlers (cross-bridge and ghost-middle patterns).
+        mol = _remove_residual_ghost_dihedrals(
+            mol, ghosts1, modifications, is_lambda1=True
+        )
+
+        # Remove any angles where the central atom is ghost and both terminal
+        # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
+        mol = _remove_ghost_centre_angles(mol, ghosts1, modifications, is_lambda1=True)
 
         # Update the molecule in the system.
         system.update(mol)
@@ -1361,6 +1381,222 @@ def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
     mol = (
         mol.edit().set_property("improper" + suffix, new_impropers).molecule().commit()
     )
+
+    # Return the updated molecule.
+    return mol
+
+
+def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=False):
+    r"""
+    Remove dihedral terms that couple ghost and physical regions but were
+    not caught by the per-bridge junction handlers. This covers two cases:
+
+    1. Cross-bridge: both terminal atoms are ghost and both middle atoms
+       are physical. This arises when two ghost groups have adjacent bridge
+       atoms. The dihedral DR1-X1-X2-DR2 escapes both junction handlers
+       because each handler only sees its own ghost group.
+
+            DR1          DR2
+              \          /
+               X1------X2
+              /          \
+            R1            R2
+
+       Removed dihedral: DR1-X1-X2-DR2
+
+    2. Ghost middle: both terminal atoms are physical but at least one
+       middle atom is ghost. This arises in ring-breaking topologies where
+       a ghost atom is bonded to two bridge atoms.
+
+            R1          R2
+              \        /
+               X1-DR-X2
+              /        \
+            R3          R4
+
+       Removed dihedrals: e.g. R1-X1-DR-X2, X1-DR-X2-R2
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the current end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to modify dihedrals at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
+
+    # Store the molecular info.
+    info = mol.info()
+
+    # Get the end state property.
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
+
+    # Get the end state dihedral functions.
+    dihedrals = mol.property("dihedral" + suffix)
+
+    # Initialise a container to store the updated dihedral functions.
+    new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+
+    # Track whether any modifications were made.
+    modified = False
+
+    # Loop over the dihedral potentials.
+    for p in dihedrals.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        # Case 1: Both terminals ghost, both middles physical (cross-bridge).
+        cross_bridge = (
+            idx0 in ghosts
+            and idx3 in ghosts
+            and idx1 not in ghosts
+            and idx2 not in ghosts
+        )
+
+        # Case 2: Both terminals physical, at least one middle ghost
+        # (ring-breaking).
+        ghost_middle = (
+            idx0 not in ghosts
+            and idx3 not in ghosts
+            and (idx1 in ghosts or idx2 in ghosts)
+        )
+
+        if cross_bridge or ghost_middle:
+            _logger.debug(
+                f"  Removing residual ghost dihedral: "
+                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
+                f"{p.function()}"
+            )
+            dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+            dih_idx = ",".join([str(i) for i in dih_idx])
+            modifications[mod_key]["removed_dihedrals"].append(dih_idx)
+            modified = True
+        else:
+            new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+    # Set the updated dihedrals.
+    if modified:
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
+
+    # Return the updated molecule.
+    return mol
+
+
+def _remove_ghost_centre_angles(mol, ghosts, modifications, is_lambda1=False):
+    r"""
+    Remove angle terms where the central atom is ghost and both terminal
+    atoms are physical. These can arise in ring-breaking topologies where
+    a ghost atom is bonded to two bridge atoms. The per-bridge junction
+    handlers only catch angles with ghost terminal atoms, not ghost central
+    atoms.
+
+        R1          R2
+          \        /
+           X1-DR-X2
+          /        \
+        R3          R4
+
+    Removed angle: X1-DR-X2
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the current end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to modify angles at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
+
+    # Store the molecular info.
+    info = mol.info()
+
+    # Get the end state property.
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
+
+    # Get the end state angle functions.
+    angles = mol.property("angle" + suffix)
+
+    # Initialise a container to store the updated angle functions.
+    new_angles = _SireMM.ThreeAtomFunctions(mol.info())
+
+    # Track whether any modifications were made.
+    modified = False
+
+    # Loop over the angle potentials.
+    for p in angles.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+
+        # Remove any angle where the central atom is ghost and both
+        # terminal atoms are physical.
+        if idx1 in ghosts and idx0 not in ghosts and idx2 not in ghosts:
+            _logger.debug(
+                f"  Removing ghost centre angle: "
+                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                f"{p.function()}"
+            )
+            ang_idx = (idx0.value(), idx1.value(), idx2.value())
+            ang_idx = ",".join([str(i) for i in ang_idx])
+            modifications[mod_key]["removed_angles"].append(ang_idx)
+            modified = True
+        else:
+            new_angles.set(idx0, idx1, idx2, p.function())
+
+    # Set the updated angles.
+    if modified:
+        mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
 
     # Return the updated molecule.
     return mol
