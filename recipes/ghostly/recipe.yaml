@@ -1,0 +1,52 @@
+context:
+  name: ghostly
+
+package:
+  name: ${{ name }}
+  version: ${{ env.get('GIT_DESCRIBE_TAG', default='PR') }}
+
+source:
+  path: ../../ghostly-source.tar.gz
+
+build:
+  number: ${{ env.get('GIT_DESCRIBE_NUMBER', default='0') }}
+  noarch: python
+  script: python -m pip install . --no-deps --ignore-installed -vv
+
+requirements:
+  host:
+    - pip
+    - python
+    - setuptools
+    - versioningit
+  run:
+    - biosimspace
+    - loguru
+    - numpy <2.3  # Remove when nglview >=4.1 is released
+    - python
+
+tests:
+  - python:
+      imports:
+        - ghostly
+  - script:
+      - pytest -vvv --color=yes --import-mode=importlib ./tests
+    files:
+      source:
+        - src/ghostly/
+        - tests/
+    requirements:
+      run:
+        - pytest
+
+about:
+  homepage: https://github.com/openbiosim/ghostly
+  license: GPL-3.0-or-later
+  license_file: LICENSE
+  summary: "Ghost atom bonded term modifications for alchemical free-energy simulations."
+  repository: https://github.com/openbiosim/ghostly
+  documentation: https://github.com/openbiosim/ghostly
+
+extra:
+  recipe-maintainers:
+    - lohedges

@@ -30,30 +30,9 @@ See the [examples](examples) directory for more details.
 
 ## Installation
 
-First create a conda environment using the provided environment file:
+### Conda package
 
-```
-conda env create -f environment.yaml
-```
-
-(We recommend using [Miniforge](https://github.com/conda-forge/miniforge).)
-
-Now install `ghostly` into the environment:
-
-```
-conda activate ghostly
-pip install .
-```
-
-Or, for an editable install (useful for development):
-
-```
-conda activate ghostly
-pip install -e .
-```
-
-For an existing conda environment, you can also install `ghostly` directly from
-the `openbiosim` channel:
+Install `ghostly` directly from the `openbiosim` channel:
 
 ```
 conda install -c conda-forge -c openbiosim ghostly
@@ -65,6 +44,46 @@ Or, for the development version:
 conda install -c conda-forge -c openbiosim/label/dev ghostly
 ```
 
+### Installing from source (standalone)
+
+To install from source using [pixi](https://pixi.sh), which will
+automatically create an environment with all required dependencies
+(including pre-built [Sire](https://github.com/OpenBioSim/sire) and
+[BioSimSpace](https://github.com/OpenBioSim/biosimspace)):
+
+```
+git clone https://github.com/openbiosim/ghostly
+cd ghostly
+pixi install
+pixi shell
+pip install -e .
+```
+
+### Installing from source (full OpenBioSim development)
+
+If you are developing across the full OpenBioSim stack, first install
+[Sire](https://github.com/OpenBioSim/sire) from source by following the
+instructions [here](https://github.com/OpenBioSim/sire#installation), then
+activate its pixi environment:
+
+```
+pixi shell --manifest-path /path/to/sire/pixi.toml -e dev
+```
+
+You may also need to install other packages from source, e.g.
+[BioSimSpace](https://github.com/OpenBioSim/biosimspace):
+
+```
+pip install -e /path/to/biosimspace/python
+```
+
+Then install `ghostly` into the environment:
+
+```
+pip install -e .
+```
+
+### Testing
 
 You should now have a `ghostly` executable in your path. To test, run:
 

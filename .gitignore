@@ -40,3 +40,6 @@ recipes/ghostly/meta.yaml
 
 # Sire cache files.
 cache/
+
+# Auto-generated version file.
+src/ghostly/_version.py

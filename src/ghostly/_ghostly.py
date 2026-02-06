@@ -31,7 +31,7 @@ import sire.morph as _morph
 
 try:
     from somd2 import _logger
-except:
+except Exception:
     from loguru import logger as _logger
 
 import platform as _platform
@@ -86,6 +86,19 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
 
     For technical details, please refer to the original publication:
         https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328
+
+    .. todo::
+
+        To enable rotamer stiffening in ``_check_rotamer_anchors``, add
+        parameters here and expose them through the CLI:
+
+        - ``stiffen_rotamers`` (bool): enable/disable rotamer stiffening.
+          Pass as ``stiffen`` to ``_check_rotamer_anchors``.
+        - ``k_rotamer`` (float): force constant for the replacement cosine
+          well (kcal/mol). The barrier height is 2 * k_rotamer.
+
+        The ``modifications`` dict will also need a ``"stiffened_dihedrals"``
+        key initialised to an empty list for each end state.
     """
 
     # Check the system is a Sire system.
@@ -125,9 +138,6 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
     }
 
     for mol in pert_mols:
-        # Store the molecule info.
-        info = mol.info()
-
         # Generate the end state connectivity objects.
         connectivity0 = _create_connectivity(_morph.link_to_reference(mol))
         connectivity1 = _create_connectivity(_morph.link_to_perturbed(mol))
@@ -163,12 +173,16 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     else:
                         bridges0[c].append(ghost)
         # Work out the indices of the other physical atoms that are connected to
-        # the bridge atoms, sorted by the atom index.
+        # the bridge atoms, sorted by the atom index. These are "core" physical
+        # atoms, i.e. they are physical in both end states.
         physical0 = {}
         for b in bridges0:
             physical0[b] = []
             for c in connectivity0.connections_to(b):
-                if not _is_ghost(mol, [c])[0]:
+                if (
+                    not _is_ghost(mol, [c])[0]
+                    and not _is_ghost(mol, [c], is_lambda1=True)[0]
+                ):
                     physical0[b].append(c)
         for b in physical0:
             physical0[b].sort(key=lambda x: x.value())
@@ -186,7 +200,10 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
         for b in bridges1:
             physical1[b] = []
             for c in connectivity1.connections_to(b):
-                if not _is_ghost(mol, [c], is_lambda1=True)[0]:
+                if (
+                    not _is_ghost(mol, [c])[0]
+                    and not _is_ghost(mol, [c], is_lambda1=True)[0]
+                ):
                     physical1[b].append(c)
         for b in physical1:
             physical1[b].sort(key=lambda x: x.value())
@@ -249,6 +266,7 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     b,
                     bridges0[b],
                     physical0[b],
+                    connectivity0,
                     modifications,
                     k_hard=k_hard,
                     k_soft=k_soft,
@@ -270,6 +288,24 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     optimise_angles=optimise_angles,
                     num_optimise=num_optimise,
                 )
+
+            # Remove any improper dihedrals connecting ghosts to the physical region.
+            mol = _remove_impropers(mol, ghosts0, modifications, is_lambda1=False)
+
+        # Remove any residual ghost dihedrals not caught by the per-bridge
+        # junction handlers (cross-bridge and ghost-middle patterns).
+        mol = _remove_residual_ghost_dihedrals(
+            mol, ghosts0, modifications, is_lambda1=False
+        )
+
+        # Remove any angles where the central atom is ghost and both terminal
+        # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
+        mol = _remove_ghost_centre_angles(mol, ghosts0, modifications, is_lambda1=False)
+
+        # Check for potential rotamer anchor dihedrals.
+        mol = _check_rotamer_anchors(
+            mol, bridges0, physical0, ghosts0, modifications, is_lambda1=False
+        )
 
         # Now lambda = 1.
         for b in bridges1:
@@ -304,6 +340,7 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     b,
                     bridges1[b],
                     physical1[b],
+                    connectivity1,
                     modifications,
                     k_hard=k_hard,
                     k_soft=k_soft,
@@ -327,6 +364,24 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     num_optimise=num_optimise,
                     is_lambda1=True,
                 )
+
+            # Remove any improper dihedrals connecting ghosts to the physical region.
+            mol = _remove_impropers(mol, ghosts1, modifications, is_lambda1=True)
+
+        # Remove any residual ghost dihedrals not caught by the per-bridge
+        # junction handlers (cross-bridge and ghost-middle patterns).
+        mol = _remove_residual_ghost_dihedrals(
+            mol, ghosts1, modifications, is_lambda1=True
+        )
+
+        # Remove any angles where the central atom is ghost and both terminal
+        # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
+        mol = _remove_ghost_centre_angles(mol, ghosts1, modifications, is_lambda1=True)
+
+        # Check for potential rotamer anchor dihedrals.
+        mol = _check_rotamer_anchors(
+            mol, bridges1, physical1, ghosts1, modifications, is_lambda1=True
+        )
 
         # Update the molecule in the system.
         system.update(mol)
@@ -621,7 +676,7 @@ def _dual(
     else:
         _logger.debug("  Dual branch:")
 
-        # First, delete all bonded terms between atoms in two ghost branches.
+        # First, delete all bonded terms between atoms in the two ghost branches.
 
         # Get the end state bond functions.
         angles = mol.property("angle" + suffix)
@@ -679,11 +734,11 @@ def _dual(
         )
 
         # Now treat the ghost branches individually.
-        for d in ghosts:
+        for ghost in ghosts:
             mol = _dual(
                 mol,
                 bridge,
-                [d],
+                [ghost],
                 physical,
                 connectivity,
                 modifications,
@@ -700,6 +755,7 @@ def _triple(
     bridge,
     ghosts,
     physical,
+    connectivity,
     modifications,
     k_hard=100,
     k_soft=5,
@@ -734,6 +790,9 @@ def _triple(
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
+
+    connectivity : sire.legacy.MM.Connectivity
+        The connectivity of the molecule at the relevant end state.
 
     modifications : dict
         A dictionary to store details of the modifications made.
@@ -922,6 +981,7 @@ def _triple(
                 theta0s[idx] = []
 
             # Perform multiple minimisations to get an average for the theta0 values.
+            is_error = False
             for _ in range(num_optimise):
                 # Minimise the molecule.
                 min_mol = _morph.link_to_reference(mol)
@@ -930,7 +990,10 @@ def _triple(
                     constraint="none",
                     platform="cpu",
                 )
-                minimiser.run()
+                try:
+                    minimiser.run()
+                except Exception:
+                    is_error = True
 
                 # Commit the changes.
                 min_mol = minimiser.commit()
@@ -939,8 +1002,14 @@ def _triple(
                 for idx in angle_idxs:
                     try:
                         theta0s[idx].append(min_mol.angles(*idx).sizes()[0].to(_radian))
-                    except:
+                    except Exception:
                         raise ValueError(f"Could not find optimised angle term: {idx}")
+
+                if is_error:
+                    _logger.warning(
+                        "Minimisation failed to converge during angle optimisation."
+                    )
+                    break
 
             # Compute the mean and standard error.
             import numpy as _np
@@ -1056,57 +1125,25 @@ def _triple(
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
-        # Next we modify the angle terms between the remaining physical and
-        # ghost atoms so that the equilibrium angle is 90 degrees.
-        new_new_angles = _SireMM.ThreeAtomFunctions(mol.info())
-        for p in new_angles.potentials():
-            idx0 = info.atom_idx(p.atom0())
-            idx1 = info.atom_idx(p.atom1())
-            idx2 = info.atom_idx(p.atom2())
-
-            if (
-                idx0 in ghosts
-                and idx2 in physical[1:]
-                or idx0 in physical[1:]
-                and idx2 in ghosts
-            ):
-                from math import pi
-                from sire.legacy.CAS import Symbol
-
-                theta0 = pi / 2.0
-
-                # Create the new angle function.
-                amber_angle = _SireMM.AmberAngle(k_hard, theta0)
-
-                # Generate the new angle expression.
-                expression = amber_angle.to_expression(Symbol("theta"))
-
-                # Set the equilibrium angle to 90 degrees.
-                new_new_angles.set(idx0, idx1, idx2, expression)
-
-                _logger.debug(
-                    f"  Stiffening angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
-                    f"{p.function()} --> {expression}"
-                )
-
-                ang_idx = (idx0.value(), idx1.value(), idx2.value())
-                modifications[mod_key]["stiffened_angles"].append(ang_idx)
-
-            else:
-                new_new_angles.set(idx0, idx1, idx2, p.function())
-
         # Update the molecule.
-        mol = (
-            mol.edit()
-            .set_property("angle" + suffix, new_new_angles)
-            .molecule()
-            .commit()
-        )
+        mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
         mol = (
             mol.edit()
             .set_property("dihedral" + suffix, new_dihedrals)
             .molecule()
             .commit()
+        )
+
+        # Next we treat the remaining terms as a dual junction.
+        mol = _dual(
+            mol,
+            bridge,
+            ghosts,
+            physical[1:],
+            connectivity,
+            modifications,
+            k_hard=k_hard,
+            is_lambda1=is_lambda1,
         )
 
     # Return the updated molecule.
@@ -1296,6 +1333,7 @@ def _higher(
         bridge,
         ghosts,
         physical,
+        connectivity,
         modifications,
         k_hard=k_hard,
         k_soft=k_soft,
@@ -1303,6 +1341,494 @@ def _higher(
         num_optimise=num_optimise,
         is_lambda1=is_lambda1,
     )
+
+
+def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
+    """
+    Remove improper dihedral terms that bridge the ghost and physical systems.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to remove the improper dihedrals at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    # Store the molecular info.
+    info = mol.info()
+
+    # Get the end state bond functions.
+    suffix = "1" if is_lambda1 else "0"
+    impropers = mol.property("improper" + suffix)
+
+    # Initialise a container to store the updated bonded terms.
+    new_impropers = _SireMM.FourAtomFunctions(mol.info())
+
+    # Loop over the improper dihedrals.
+    for p in impropers.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        # Remove any improper dihedrals that bridge the ghost and physical systems.
+        if not all(idx in ghosts for idx in (idx0, idx1, idx2, idx3)) and any(
+            idx in ghosts for idx in (idx0, idx1, idx2, idx3)
+        ):
+            _logger.debug(
+                f"  Removing improper dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
+            )
+            dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+            dih_idx = ",".join([str(i) for i in dih_idx])
+            key = "lambda_1" if is_lambda1 else "lambda_0"
+            modifications[key]["removed_dihedrals"].append(dih_idx)
+        else:
+            new_impropers.set(idx0, idx1, idx2, idx3, p.function())
+
+    # Set the updated impropers.
+    mol = (
+        mol.edit().set_property("improper" + suffix, new_impropers).molecule().commit()
+    )
+
+    # Return the updated molecule.
+    return mol
+
+
+def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=False):
+    r"""
+    Remove dihedral terms that couple ghost and physical regions but were
+    not caught by the per-bridge junction handlers. This covers two cases:
+
+    1. Cross-bridge: both terminal atoms are ghost and both middle atoms
+       are physical. This arises when two ghost groups have adjacent bridge
+       atoms. The dihedral DR1-X1-X2-DR2 escapes both junction handlers
+       because each handler only sees its own ghost group.
+
+            DR1          DR2
+              \          /
+               X1------X2
+              /          \
+            R1            R2
+
+       Removed dihedral: DR1-X1-X2-DR2
+
+    2. Ghost middle: both terminal atoms are physical but at least one
+       middle atom is ghost. This arises in ring-breaking topologies where
+       a ghost atom is bonded to two bridge atoms.
+
+            R1          R2
+              \        /
+               X1-DR-X2
+              /        \
+            R3          R4
+
+       Removed dihedrals: e.g. R1-X1-DR-X2, X1-DR-X2-R2
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the current end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to modify dihedrals at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
+
+    # Store the molecular info.
+    info = mol.info()
+
+    # Get the end state property.
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
+
+    # Get the end state dihedral functions.
+    dihedrals = mol.property("dihedral" + suffix)
+
+    # Initialise a container to store the updated dihedral functions.
+    new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+
+    # Track whether any modifications were made.
+    modified = False
+
+    # Loop over the dihedral potentials.
+    for p in dihedrals.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        # Case 1: Both terminals ghost, both middles physical (cross-bridge).
+        cross_bridge = (
+            idx0 in ghosts
+            and idx3 in ghosts
+            and idx1 not in ghosts
+            and idx2 not in ghosts
+        )
+
+        # Case 2: Both terminals physical, at least one middle ghost
+        # (ring-breaking).
+        ghost_middle = (
+            idx0 not in ghosts
+            and idx3 not in ghosts
+            and (idx1 in ghosts or idx2 in ghosts)
+        )
+
+        if cross_bridge or ghost_middle:
+            _logger.debug(
+                f"  Removing residual ghost dihedral: "
+                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
+                f"{p.function()}"
+            )
+            dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+            dih_idx = ",".join([str(i) for i in dih_idx])
+            modifications[mod_key]["removed_dihedrals"].append(dih_idx)
+            modified = True
+        else:
+            new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+    # Set the updated dihedrals.
+    if modified:
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
+
+    # Return the updated molecule.
+    return mol
+
+
+def _remove_ghost_centre_angles(mol, ghosts, modifications, is_lambda1=False):
+    r"""
+    Remove angle terms where the central atom is ghost and both terminal
+    atoms are physical. These can arise in ring-breaking topologies where
+    a ghost atom is bonded to two bridge atoms. The per-bridge junction
+    handlers only catch angles with ghost terminal atoms, not ghost central
+    atoms.
+
+        R1          R2
+          \        /
+           X1-DR-X2
+          /        \
+        R3          R4
+
+    Removed angle: X1-DR-X2
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the current end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to modify angles at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
+
+    # Store the molecular info.
+    info = mol.info()
+
+    # Get the end state property.
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
+
+    # Get the end state angle functions.
+    angles = mol.property("angle" + suffix)
+
+    # Initialise a container to store the updated angle functions.
+    new_angles = _SireMM.ThreeAtomFunctions(mol.info())
+
+    # Track whether any modifications were made.
+    modified = False
+
+    # Loop over the angle potentials.
+    for p in angles.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+
+        # Remove any angle where the central atom is ghost and both
+        # terminal atoms are physical.
+        if idx1 in ghosts and idx0 not in ghosts and idx2 not in ghosts:
+            _logger.debug(
+                f"  Removing ghost centre angle: "
+                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                f"{p.function()}"
+            )
+            ang_idx = (idx0.value(), idx1.value(), idx2.value())
+            ang_idx = ",".join([str(i) for i in ang_idx])
+            modifications[mod_key]["removed_angles"].append(ang_idx)
+            modified = True
+        else:
+            new_angles.set(idx0, idx1, idx2, p.function())
+
+    # Set the updated angles.
+    if modified:
+        mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
+
+    # Return the updated molecule.
+    return mol
+
+
+def _check_rotamer_anchors(
+    mol,
+    bridges,
+    physical,
+    ghosts,
+    modifications,
+    is_lambda1=False,
+    stiffen=False,
+    k_rotamer=50,
+):
+    r"""
+    Detect and optionally stiffen rotamer anchor dihedrals.
+
+    After ghost modifications, each bridge atom retains anchor dihedral(s)
+    that constrain the ghost group's rotation. If the bridge--physical bond
+    is not in a ring and the bridge atom is sp3-hybridised, the anchor
+    dihedral is likely a rotamer. This can allow the ghost group to flip
+    between rotameric states at intermediate lambda, degrading convergence
+    (see Boresch et al., JCTC 2021).
+
+        R1     DR1
+          \   /
+           \ /
+            X ---DR2       X is sp3, P-X is rotatable
+           / \
+          /   \
+        R2     DR3
+
+    Rotamer anchors are always logged as warnings. When ``stiffen=True``,
+    affected dihedrals (those spanning the rotatable bond with at least one
+    ghost terminal) are replaced with a single n=1 cosine well:
+
+        V(phi) = k [1 + cos(phi - pi)]
+
+    which has a single minimum at phi = 0 (trans) and a barrier of 2k.
+
+    .. note::
+
+        Stiffening is not currently enabled. When wiring in, add
+        ``stiffen_rotamers`` and ``k_rotamer`` parameters to ``modify()``
+        and expose them through the CLI. The ``modifications`` dict will
+        also need a ``"stiffened_dihedrals"`` key initialised to an empty
+        list for each end state.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    bridges : dict
+        A dictionary mapping bridge atoms to their ghost neighbours.
+
+    physical : dict
+        A dictionary mapping bridge atoms to their physical neighbours.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the current end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to check/modify the lambda = 1 end state.
+
+    stiffen : bool, optional
+        Whether to replace rotamer anchor dihedrals with a stiff cosine
+        well. If False (default), only log warnings.
+
+    k_rotamer : float, optional
+        The force constant for the replacement cosine term. The resulting
+        barrier height is 2 * k_rotamer. (In kcal/mol) Only used when
+        ``stiffen=True``. The default of 50 is a placeholder and has not
+        been calibrated against simulation data. It should be benchmarked
+        before use.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule (unchanged if ``stiffen=False``).
+    """
+
+    # Nothing to do if there are no bridges.
+    if not bridges:
+        return mol
+
+    from rdkit.Chem import HybridizationType
+    from sire.convert import to_rdkit
+
+    lam = int(is_lambda1)
+
+    # Link the molecule to the desired end state and convert to RDKit.
+    if is_lambda1:
+        end_state_mol = _morph.link_to_perturbed(mol)
+    else:
+        end_state_mol = _morph.link_to_reference(mol)
+
+    try:
+        rdmol = to_rdkit(end_state_mol)
+    except Exception as e:
+        _logger.warning(f"Failed to convert molecule to RDKit for rotamer check: {e}")
+        return mol
+
+    # Identify rotatable bridge--physical bond pairs.
+    rotatable_bonds = set()
+    for bridge in bridges:
+        for p in physical[bridge]:
+            b_idx = bridge.value()
+            p_idx = p.value()
+
+            rd_bond = rdmol.GetBondBetweenAtoms(p_idx, b_idx)
+            if rd_bond is None or rd_bond.IsInRing():
+                continue
+
+            rd_bridge = rdmol.GetAtomWithIdx(b_idx)
+            hybridisation = rd_bridge.GetHybridization()
+
+            if hybridisation in (
+                HybridizationType.SP3,
+                HybridizationType.SP3D,
+                HybridizationType.SP3D2,
+            ):
+                rotatable_bonds.add((p, bridge))
+                if not stiffen:
+                    _logger.warning(
+                        f"Potential rotamer anchor at {_lam_sym} = {lam}: "
+                        f"bond {p_idx}-{b_idx} is a rotatable sp3 bond. "
+                        f"Surviving anchor dihedrals may allow rotameric "
+                        f"transitions of ghost atoms."
+                    )
+
+    # If not stiffening, or no rotatable bonds found, return early.
+    if not stiffen or not rotatable_bonds:
+        return mol
+
+    # Stiffen the anchor dihedrals spanning the rotatable bonds.
+
+    from math import pi
+
+    from sire.legacy.CAS import Symbol
+
+    # Get the end state property suffix.
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
+
+    # Store the molecular info.
+    info = mol.info()
+
+    # Get the end state dihedral functions.
+    dihedrals = mol.property("dihedral" + suffix)
+
+    # Create the stiff single-well replacement: k[1 + cos(phi - pi)].
+    # Minimum at phi = 0 (trans), barrier height = 2k.
+    replacement = _SireMM.AmberDihedral(
+        _SireMM.AmberDihPart(k_rotamer, 1, pi)
+    ).to_expression(Symbol("phi"))
+
+    # Initialise a container to store the updated dihedral functions.
+    new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+
+    modified = False
+
+    for p in dihedrals.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        # Check if the central bond (idx1-idx2) is a rotatable bridge bond
+        # and at least one terminal atom is ghost.
+        bond_pair = (idx1, idx2)
+        bond_pair_rev = (idx2, idx1)
+        has_ghost_terminal = idx0 in ghosts or idx3 in ghosts
+
+        if has_ghost_terminal and (
+            bond_pair in rotatable_bonds or bond_pair_rev in rotatable_bonds
+        ):
+            _logger.debug(
+                f"  Stiffening rotamer anchor dihedral: "
+                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
+                f"{p.function()} --> {replacement}"
+            )
+            new_dihedrals.set(idx0, idx1, idx2, idx3, replacement)
+            dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+            dih_idx = ",".join([str(i) for i in dih_idx])
+            modifications[mod_key]["stiffened_dihedrals"].append(dih_idx)
+            modified = True
+        else:
+            new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+    if modified:
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
+
+    return mol
 
 
 def _create_connectivity(mol):

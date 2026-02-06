@@ -1,0 +1,18 @@
+[workspace]
+name = "ghostly"
+channels = ["conda-forge", "openbiosim/label/dev"]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64", "win-64"]
+
+[dependencies]
+python = ">=3.10"
+biosimspace = "*"
+loguru = "*"
+
+[feature.test.dependencies]
+pytest = "*"
+black = "*"
+
+[environments]
+default = []
+test = ["test"]
+dev = ["test"]
