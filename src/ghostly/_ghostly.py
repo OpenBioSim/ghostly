@@ -86,6 +86,19 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
 
     For technical details, please refer to the original publication:
         https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328
+
+    .. todo::
+
+        To enable rotamer stiffening in ``_check_rotamer_anchors``, add
+        parameters here and expose them through the CLI:
+
+        - ``stiffen_rotamers`` (bool): enable/disable rotamer stiffening.
+          Pass as ``stiffen`` to ``_check_rotamer_anchors``.
+        - ``k_rotamer`` (float): force constant for the replacement cosine
+          well (kcal/mol). The barrier height is 2 * k_rotamer.
+
+        The ``modifications`` dict will also need a ``"stiffened_dihedrals"``
+        key initialised to an empty list for each end state.
     """
 
     # Check the system is a Sire system.
@@ -289,6 +302,11 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
         # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
         mol = _remove_ghost_centre_angles(mol, ghosts0, modifications, is_lambda1=False)
 
+        # Check for potential rotamer anchor dihedrals.
+        mol = _check_rotamer_anchors(
+            mol, bridges0, physical0, ghosts0, modifications, is_lambda1=False
+        )
+
         # Now lambda = 1.
         for b in bridges1:
             junction = len(physical1[b])
@@ -359,6 +377,11 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
         # Remove any angles where the central atom is ghost and both terminal
         # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
         mol = _remove_ghost_centre_angles(mol, ghosts1, modifications, is_lambda1=True)
+
+        # Check for potential rotamer anchor dihedrals.
+        mol = _check_rotamer_anchors(
+            mol, bridges1, physical1, ghosts1, modifications, is_lambda1=True
+        )
 
         # Update the molecule in the system.
         system.update(mol)
@@ -1599,6 +1622,212 @@ def _remove_ghost_centre_angles(mol, ghosts, modifications, is_lambda1=False):
         mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
 
     # Return the updated molecule.
+    return mol
+
+
+def _check_rotamer_anchors(
+    mol,
+    bridges,
+    physical,
+    ghosts,
+    modifications,
+    is_lambda1=False,
+    stiffen=False,
+    k_rotamer=50,
+):
+    r"""
+    Detect and optionally stiffen rotamer anchor dihedrals.
+
+    After ghost modifications, each bridge atom retains anchor dihedral(s)
+    that constrain the ghost group's rotation. If the bridge--physical bond
+    is not in a ring and the bridge atom is sp3-hybridised, the anchor
+    dihedral is likely a rotamer. This can allow the ghost group to flip
+    between rotameric states at intermediate lambda, degrading convergence
+    (see Boresch et al., JCTC 2021).
+
+        R1     DR1
+          \   /
+           \ /
+            X ---DR2       X is sp3, P-X is rotatable
+           / \
+          /   \
+        R2     DR3
+
+    Rotamer anchors are always logged as warnings. When ``stiffen=True``,
+    affected dihedrals (those spanning the rotatable bond with at least one
+    ghost terminal) are replaced with a single n=1 cosine well:
+
+        V(phi) = k [1 + cos(phi - pi)]
+
+    which has a single minimum at phi = 0 (trans) and a barrier of 2k.
+
+    .. note::
+
+        Stiffening is not currently enabled. When wiring in, add
+        ``stiffen_rotamers`` and ``k_rotamer`` parameters to ``modify()``
+        and expose them through the CLI. The ``modifications`` dict will
+        also need a ``"stiffened_dihedrals"`` key initialised to an empty
+        list for each end state.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    bridges : dict
+        A dictionary mapping bridge atoms to their ghost neighbours.
+
+    physical : dict
+        A dictionary mapping bridge atoms to their physical neighbours.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the current end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to check/modify the lambda = 1 end state.
+
+    stiffen : bool, optional
+        Whether to replace rotamer anchor dihedrals with a stiff cosine
+        well. If False (default), only log warnings.
+
+    k_rotamer : float, optional
+        The force constant for the replacement cosine term. The resulting
+        barrier height is 2 * k_rotamer. (In kcal/mol) Only used when
+        ``stiffen=True``. The default of 50 is a placeholder and has not
+        been calibrated against simulation data. It should be benchmarked
+        before use.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule (unchanged if ``stiffen=False``).
+    """
+
+    # Nothing to do if there are no bridges.
+    if not bridges:
+        return mol
+
+    from rdkit.Chem import HybridizationType
+    from sire.convert import to_rdkit
+
+    lam = int(is_lambda1)
+
+    # Link the molecule to the desired end state and convert to RDKit.
+    if is_lambda1:
+        end_state_mol = _morph.link_to_perturbed(mol)
+    else:
+        end_state_mol = _morph.link_to_reference(mol)
+
+    try:
+        rdmol = to_rdkit(end_state_mol)
+    except Exception as e:
+        _logger.warning(f"Failed to convert molecule to RDKit for rotamer check: {e}")
+        return mol
+
+    # Identify rotatable bridge--physical bond pairs.
+    rotatable_bonds = set()
+    for bridge in bridges:
+        for p in physical[bridge]:
+            b_idx = bridge.value()
+            p_idx = p.value()
+
+            rd_bond = rdmol.GetBondBetweenAtoms(p_idx, b_idx)
+            if rd_bond is None or rd_bond.IsInRing():
+                continue
+
+            rd_bridge = rdmol.GetAtomWithIdx(b_idx)
+            hybridisation = rd_bridge.GetHybridization()
+
+            if hybridisation in (
+                HybridizationType.SP3,
+                HybridizationType.SP3D,
+                HybridizationType.SP3D2,
+            ):
+                rotatable_bonds.add((p, bridge))
+                if not stiffen:
+                    _logger.warning(
+                        f"Potential rotamer anchor at {_lam_sym} = {lam}: "
+                        f"bond {p_idx}-{b_idx} is a rotatable sp3 bond. "
+                        f"Surviving anchor dihedrals may allow rotameric "
+                        f"transitions of ghost atoms."
+                    )
+
+    # If not stiffening, or no rotatable bonds found, return early.
+    if not stiffen or not rotatable_bonds:
+        return mol
+
+    # Stiffen the anchor dihedrals spanning the rotatable bonds.
+
+    from math import pi
+
+    from sire.legacy.CAS import Symbol
+
+    # Get the end state property suffix.
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
+
+    # Store the molecular info.
+    info = mol.info()
+
+    # Get the end state dihedral functions.
+    dihedrals = mol.property("dihedral" + suffix)
+
+    # Create the stiff single-well replacement: k[1 + cos(phi - pi)].
+    # Minimum at phi = 0 (trans), barrier height = 2k.
+    replacement = _SireMM.AmberDihedral(
+        _SireMM.AmberDihPart(k_rotamer, 1, pi)
+    ).to_expression(Symbol("phi"))
+
+    # Initialise a container to store the updated dihedral functions.
+    new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+
+    modified = False
+
+    for p in dihedrals.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        # Check if the central bond (idx1-idx2) is a rotatable bridge bond
+        # and at least one terminal atom is ghost.
+        bond_pair = (idx1, idx2)
+        bond_pair_rev = (idx2, idx1)
+        has_ghost_terminal = idx0 in ghosts or idx3 in ghosts
+
+        if has_ghost_terminal and (
+            bond_pair in rotatable_bonds or bond_pair_rev in rotatable_bonds
+        ):
+            _logger.debug(
+                f"  Stiffening rotamer anchor dihedral: "
+                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
+                f"{p.function()} --> {replacement}"
+            )
+            new_dihedrals.set(idx0, idx1, idx2, idx3, replacement)
+            dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+            dih_idx = ",".join([str(i) for i in dih_idx])
+            modifications[mod_key]["stiffened_dihedrals"].append(dih_idx)
+            modified = True
+        else:
+            new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+    if modified:
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
+
     return mol
 
 
