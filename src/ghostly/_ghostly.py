@@ -855,10 +855,18 @@ def _triple(
     # Get the hybridisation of the bridge atom.
     hybridisation = rdmol.GetAtomWithIdx(bridge.value()).GetHybridization()
 
+    # Warn if the hybridisation is unspecified.
+    if hybridisation in (HybridizationType.UNSPECIFIED, HybridizationType.OTHER):
+        _logger.warning(
+            f"Unspecified hybridisation for bridge atom {bridge.value()} "
+            f"at {_lam_sym} = {int(is_lambda1)}. Defaulting to planar junction."
+        )
+
     # Non-planar junction.
-    if (
-        hybridisation == HybridizationType.SP3
-        or hybridisation == HybridizationType.SP3D
+    if hybridisation in (
+        HybridizationType.SP3,
+        HybridizationType.SP3D,
+        HybridizationType.SP3D2,
     ):
         _logger.debug("  Non-planar junction.")
 
