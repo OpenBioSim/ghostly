@@ -5,8 +5,20 @@ platforms = ["linux-64", "linux-aarch64", "osx-arm64", "win-64"]
 
 [dependencies]
 python = ">=3.10"
-biosimspace = "*"
 loguru = "*"
+
+[target.linux-64.dependencies]
+biosimspace = "*"
+
+[target.linux-aarch64.dependencies]
+# biosimspace/sire not available as conda packages on linux-aarch64;
+# build from source first
+
+[target.osx-arm64.dependencies]
+biosimspace = "*"
+
+[target.win-64.dependencies]
+biosimspace = "*"
 
 [feature.test.dependencies]
 pytest = "*"
