@@ -44,7 +44,16 @@ else:
 del _platform
 
 
-def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
+def modify(
+    system,
+    k_hard=100,
+    k_soft=5,
+    optimise_angles=True,
+    num_optimise=10,
+    soften_anchors=1.0,
+    stiffen_rotamers=False,
+    k_rotamer=50,
+):
     """
     Apply modifications to ghost atom bonded terms to avoid non-physical
     coupling between the ghost atoms and the physical region.
@@ -72,6 +81,29 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
         value of the angle terms involving ghost atoms for non-planar triple
         junctions.
 
+    soften_anchors : float, optional
+        Scale factor for anchor dihedral force constants in terminal junctions.
+        A value of 1.0 (default) keeps the original force constants (Boresch
+        approach). A value of 0.0 removes anchor dihedrals entirely (old
+        scheme). Intermediate values (e.g. 0.5) scale the force constants,
+        reducing the constraint on ghost group orientation while preserving
+        the thermodynamic correction. Softening can prevent dynamics crashes
+        at small lambda for complex perturbations where ghost groups are
+        constrained too tightly.
+
+    stiffen_rotamers : bool, optional
+        Whether to replace rotamer anchor dihedrals with a stiff single-well
+        cosine potential. When a bridge--physical bond is rotatable (not in a
+        ring, sp3 bridge), surviving anchor dihedrals can allow rotameric
+        transitions of ghost atoms at intermediate lambda. Enabling this
+        replaces those dihedrals with a single cosine well of depth
+        ``2 * k_rotamer``. Default is False (only log warnings).
+
+    k_rotamer : float, optional
+        The force constant for the replacement cosine well when stiffening
+        rotamer anchor dihedrals (in kcal/mol). The resulting barrier height
+        is ``2 * k_rotamer``. Only used when ``stiffen_rotamers`` is True.
+
     Returns
     -------
 
@@ -86,19 +118,6 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
 
     For technical details, please refer to the original publication:
         https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328
-
-    .. todo::
-
-        To enable rotamer stiffening in ``_check_rotamer_anchors``, add
-        parameters here and expose them through the CLI:
-
-        - ``stiffen_rotamers`` (bool): enable/disable rotamer stiffening.
-          Pass as ``stiffen`` to ``_check_rotamer_anchors``.
-        - ``k_rotamer`` (float): force constant for the replacement cosine
-          well (kcal/mol). The barrier height is 2 * k_rotamer.
-
-        The ``modifications`` dict will also need a ``"stiffened_dihedrals"``
-        key initialised to an empty list for each end state.
     """
 
     # Check the system is a Sire system.
@@ -129,12 +148,16 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
         "removed_dihedrals": [],
         "stiffened_angles": [],
         "softened_angles": {},
+        "softened_dihedrals": [],
+        "stiffened_dihedrals": [],
     }
     modifications["lambda_1"] = {
         "removed_angles": [],
         "removed_dihedrals": [],
         "stiffened_angles": [],
         "softened_angles": {},
+        "softened_dihedrals": [],
+        "stiffened_dihedrals": [],
     }
 
     for mol in pert_mols:
@@ -255,6 +278,7 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     connectivity0,
                     modifications,
                     bridge_indices=bridge_indices0,
+                    soften_anchors=soften_anchors,
                 )
 
             # Dual junction.
@@ -314,7 +338,14 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
 
         # Check for potential rotamer anchor dihedrals.
         mol = _check_rotamer_anchors(
-            mol, bridges0, physical0, ghosts0, modifications, is_lambda1=False
+            mol,
+            bridges0,
+            physical0,
+            ghosts0,
+            modifications,
+            is_lambda1=False,
+            stiffen=stiffen_rotamers,
+            k_rotamer=k_rotamer,
         )
 
         # Now lambda = 1.
@@ -331,6 +362,7 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     modifications,
                     is_lambda1=True,
                     bridge_indices=bridge_indices1,
+                    soften_anchors=soften_anchors,
                 )
 
             elif junction == 2:
@@ -391,7 +423,14 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
 
         # Check for potential rotamer anchor dihedrals.
         mol = _check_rotamer_anchors(
-            mol, bridges1, physical1, ghosts1, modifications, is_lambda1=True
+            mol,
+            bridges1,
+            physical1,
+            ghosts1,
+            modifications,
+            is_lambda1=True,
+            stiffen=stiffen_rotamers,
+            k_rotamer=k_rotamer,
         )
 
         # Update the molecule in the system.
@@ -479,6 +518,7 @@ def _terminal(
     modifications,
     is_lambda1=False,
     bridge_indices=None,
+    soften_anchors=1.0,
 ):
     r"""
     Apply modifications to a terminal junction.
@@ -523,6 +563,11 @@ def _terminal(
         Used by ``_select_anchor`` to avoid choosing bridge or transmuting
         atoms as anchors. When ``None``, falls back to first-by-index
         selection.
+
+    soften_anchors : float, optional
+        Scale factor for anchor dihedral force constants. 1.0 keeps the
+        original force constants, 0.0 removes anchor dihedrals entirely,
+        and intermediate values scale the force constants.
 
     Returns
     -------
@@ -582,15 +627,40 @@ def _terminal(
         idx1 = info.atom_idx(p.atom1())
         idx2 = info.atom_idx(p.atom2())
         idx3 = info.atom_idx(p.atom3())
-        if (idx0 in physical2 and idx3 in ghosts) or (
+
+        # Cross-bridge dihedral: non-anchor physical2 at one end, ghost at other.
+        is_cross_bridge = (idx0 in physical2 and idx3 in ghosts) or (
             idx3 in physical2 and idx0 in ghosts
-        ):
+        )
+
+        # Anchor dihedral: anchor atom at one end, ghost at the other.
+        is_anchor_dih = (idx0 == anchor and idx3 in ghosts) or (
+            idx3 == anchor and idx0 in ghosts
+        )
+
+        if is_cross_bridge:
             _logger.debug(
                 f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
             )
             dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
             dih_idx = ",".join([str(i) for i in dih_idx])
             modifications[mod_key]["removed_dihedrals"].append(dih_idx)
+        elif is_anchor_dih and soften_anchors < 1.0:
+            dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+            dih_idx_str = ",".join([str(i) for i in dih_idx])
+            if soften_anchors > 0.0:
+                scaled = p.function() * soften_anchors
+                new_dihedrals.set(idx0, idx1, idx2, idx3, scaled)
+                _logger.debug(
+                    f"  Softening anchor dihedral: [{dih_idx_str}], "
+                    f"scale={soften_anchors}"
+                )
+                modifications[mod_key]["softened_dihedrals"].append(dih_idx_str)
+            else:
+                _logger.debug(
+                    f"  Removing anchor dihedral: [{dih_idx_str}], {p.function()}"
+                )
+                modifications[mod_key]["removed_dihedrals"].append(dih_idx_str)
         else:
             new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 

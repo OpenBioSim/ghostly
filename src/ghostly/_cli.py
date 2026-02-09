@@ -134,6 +134,48 @@ def run():
     )
 
     parser.add_argument(
+        "--soften-anchors",
+        type=float,
+        help="""
+             Scale factor for anchor dihedral force constants in terminal
+             junctions. 1.0 keeps the original force constants (Boresch
+             approach). 0.0 removes anchor dihedrals entirely (old scheme).
+             Intermediate values (e.g. 0.5) scale the force constants,
+             reducing the constraint on ghost group orientation. Softening
+             can prevent dynamics crashes at small lambda for complex
+             perturbations.
+             """,
+        default=1.0,
+        required=False,
+    )
+
+    parser.add_argument(
+        "--stiffen-rotamers",
+        action=argparse.BooleanOptionalAction,
+        help="""
+             Whether to replace rotamer anchor dihedrals with a stiff
+             single-well cosine potential. When a bridge-physical bond is
+             rotatable (not in a ring, sp3 bridge), surviving anchor
+             dihedrals can allow rotameric transitions of ghost atoms at
+             intermediate lambda.
+             """,
+        default=False,
+        required=False,
+    )
+
+    parser.add_argument(
+        "--k-rotamer",
+        type=str,
+        help="""
+             The force constant for the replacement cosine well when
+             stiffening rotamer anchor dihedrals. The resulting barrier
+             height is 2 * k_rotamer.
+             """,
+        default="50 kcal/mol",
+        required=False,
+    )
+
+    parser.add_argument(
         "--output-prefix",
         type=str,
         help="File prefix for the output file.",
@@ -252,6 +294,23 @@ def run():
         logger.error("k-soft must have units of kcal/mol/rad**2")
         sys.exit(1)
 
+    # Validate soften-anchors.
+    if not 0.0 <= args.soften_anchors <= 1.0:
+        logger.error("soften-anchors must be between 0.0 and 1.0")
+        sys.exit(1)
+
+    # Try to parse the k-rotamer value.
+    try:
+        k_rotamer = sr.u(args.k_rotamer)
+    except Exception as e:
+        logger.error(f"An error occurred while parsing the k-rotamer value: {e}")
+        sys.exit(1)
+
+    u_energy = sr.u("kcal/mol")
+    if not k_rotamer.has_same_units(u_energy):
+        logger.error("k-rotamer must have units of kcal/mol")
+        sys.exit(1)
+
     # Try to merge the reference and perturbed molecules.
     if args.system is None:
         try:
@@ -275,6 +334,9 @@ def run():
             k_soft.value(),
             args.optimise_angles,
             args.num_optimise,
+            soften_anchors=args.soften_anchors,
+            stiffen_rotamers=args.stiffen_rotamers,
+            k_rotamer=k_rotamer.value(),
         )
     except Exception as e:
         logger.error(
