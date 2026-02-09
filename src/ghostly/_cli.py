@@ -137,13 +137,13 @@ def run():
         "--soften-anchors",
         type=float,
         help="""
-             Scale factor for anchor dihedral force constants in terminal
-             junctions. 1.0 keeps the original force constants (Boresch
-             approach). 0.0 removes anchor dihedrals entirely (old scheme).
-             Intermediate values (e.g. 0.5) scale the force constants,
-             reducing the constraint on ghost group orientation. Softening
-             can prevent dynamics crashes at small lambda for complex
-             perturbations.
+             Scale factor for surviving mixed ghost/physical dihedral force
+             constants. 1.0 keeps the original force constants (Boresch
+             approach). 0.0 removes all mixed dihedrals entirely (old
+             scheme). Intermediate values (e.g. 0.5) scale the force
+             constants, reducing the constraint on ghost group orientation.
+             Softening can prevent dynamics crashes at small lambda for
+             complex perturbations, particularly with multiple ghost groups.
              """,
         default=1.0,
         required=False,

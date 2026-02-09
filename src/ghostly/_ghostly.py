@@ -82,14 +82,17 @@ def modify(
         junctions.
 
     soften_anchors : float, optional
-        Scale factor for anchor dihedral force constants in terminal junctions.
-        A value of 1.0 (default) keeps the original force constants (Boresch
-        approach). A value of 0.0 removes anchor dihedrals entirely (old
-        scheme). Intermediate values (e.g. 0.5) scale the force constants,
-        reducing the constraint on ghost group orientation while preserving
-        the thermodynamic correction. Softening can prevent dynamics crashes
+        Scale factor for surviving mixed ghost/physical dihedral force
+        constants. Applied as a post-processing step after all per-bridge
+        junction handlers and residual removal passes. A value of 1.0
+        (default) keeps the original force constants (Boresch approach).
+        A value of 0.0 removes all mixed dihedrals entirely (old scheme).
+        Intermediate values (e.g. 0.5) scale the force constants, reducing
+        the constraint on ghost group orientation while preserving the
+        thermodynamic correction. Softening can prevent dynamics crashes
         at small lambda for complex perturbations where ghost groups are
-        constrained too tightly.
+        constrained too tightly, particularly when multiple ghost groups
+        share hub atoms.
 
     stiffen_rotamers : bool, optional
         Whether to replace rotamer anchor dihedrals with a stiff single-well
@@ -278,7 +281,6 @@ def modify(
                     connectivity0,
                     modifications,
                     bridge_indices=bridge_indices0,
-                    soften_anchors=soften_anchors,
                 )
 
             # Dual junction.
@@ -336,6 +338,15 @@ def modify(
         # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
         mol = _remove_ghost_centre_angles(mol, ghosts0, modifications, is_lambda1=False)
 
+        # Soften any surviving mixed ghost/physical dihedrals.
+        mol = _soften_mixed_dihedrals(
+            mol,
+            ghosts0,
+            modifications,
+            soften_anchors=soften_anchors,
+            is_lambda1=False,
+        )
+
         # Check for potential rotamer anchor dihedrals.
         mol = _check_rotamer_anchors(
             mol,
@@ -362,7 +373,6 @@ def modify(
                     modifications,
                     is_lambda1=True,
                     bridge_indices=bridge_indices1,
-                    soften_anchors=soften_anchors,
                 )
 
             elif junction == 2:
@@ -420,6 +430,15 @@ def modify(
         # Remove any angles where the central atom is ghost and both terminal
         # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
         mol = _remove_ghost_centre_angles(mol, ghosts1, modifications, is_lambda1=True)
+
+        # Soften any surviving mixed ghost/physical dihedrals.
+        mol = _soften_mixed_dihedrals(
+            mol,
+            ghosts1,
+            modifications,
+            soften_anchors=soften_anchors,
+            is_lambda1=True,
+        )
 
         # Check for potential rotamer anchor dihedrals.
         mol = _check_rotamer_anchors(
@@ -518,7 +537,6 @@ def _terminal(
     modifications,
     is_lambda1=False,
     bridge_indices=None,
-    soften_anchors=1.0,
 ):
     r"""
     Apply modifications to a terminal junction.
@@ -563,11 +581,6 @@ def _terminal(
         Used by ``_select_anchor`` to avoid choosing bridge or transmuting
         atoms as anchors. When ``None``, falls back to first-by-index
         selection.
-
-    soften_anchors : float, optional
-        Scale factor for anchor dihedral force constants. 1.0 keeps the
-        original force constants, 0.0 removes anchor dihedrals entirely,
-        and intermediate values scale the force constants.
 
     Returns
     -------
@@ -633,11 +646,6 @@ def _terminal(
             idx3 in physical2 and idx0 in ghosts
         )
 
-        # Anchor dihedral: anchor atom at one end, ghost at the other.
-        is_anchor_dih = (idx0 == anchor and idx3 in ghosts) or (
-            idx3 == anchor and idx0 in ghosts
-        )
-
         if is_cross_bridge:
             _logger.debug(
                 f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
@@ -645,22 +653,6 @@ def _terminal(
             dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
             dih_idx = ",".join([str(i) for i in dih_idx])
             modifications[mod_key]["removed_dihedrals"].append(dih_idx)
-        elif is_anchor_dih and soften_anchors < 1.0:
-            dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
-            dih_idx_str = ",".join([str(i) for i in dih_idx])
-            if soften_anchors > 0.0:
-                scaled = p.function() * soften_anchors
-                new_dihedrals.set(idx0, idx1, idx2, idx3, scaled)
-                _logger.debug(
-                    f"  Softening anchor dihedral: [{dih_idx_str}], "
-                    f"scale={soften_anchors}"
-                )
-                modifications[mod_key]["softened_dihedrals"].append(dih_idx_str)
-            else:
-                _logger.debug(
-                    f"  Removing anchor dihedral: [{dih_idx_str}], {p.function()}"
-                )
-                modifications[mod_key]["removed_dihedrals"].append(dih_idx_str)
         else:
             new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
@@ -1797,6 +1789,125 @@ def _remove_ghost_centre_angles(mol, ghosts, modifications, is_lambda1=False):
     # Set the updated angles.
     if modified:
         mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
+
+    # Return the updated molecule.
+    return mol
+
+
+def _soften_mixed_dihedrals(
+    mol, ghosts, modifications, soften_anchors=1.0, is_lambda1=False
+):
+    r"""
+    Soften surviving mixed ghost/physical dihedral terms by scaling their
+    force constants. This is a post-processing step that runs after all
+    per-bridge junction handlers and residual removal passes.
+
+    A "mixed" dihedral is one that involves at least one ghost atom and at
+    least one physical atom. These dihedrals couple the ghost and physical
+    regions and can cause dynamics crashes at small lambda when the ghost
+    atoms start gaining softcore nonbonded interactions but are constrained
+    too tightly by bonded terms.
+
+    When ``soften_anchors`` is 1.0 (default), no modifications are made.
+    When 0.0, all mixed dihedrals are removed. Intermediate values scale
+    the force constants.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the current end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    soften_anchors : float, optional
+        Scale factor for mixed dihedral force constants (0.0 to 1.0).
+
+    is_lambda1 : bool, optional
+        Whether to modify dihedrals at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    # Nothing to do if there are no ghost atoms or no softening is requested.
+    if not ghosts or soften_anchors >= 1.0:
+        return mol
+
+    # Store the molecular info.
+    info = mol.info()
+
+    # Get the end state property.
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
+
+    # Get the end state dihedral functions.
+    dihedrals = mol.property("dihedral" + suffix)
+
+    # Initialise a container to store the updated dihedral functions.
+    new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+
+    # Track whether any modifications were made.
+    modified = False
+
+    # Loop over the dihedral potentials.
+    for p in dihedrals.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        atoms = (idx0, idx1, idx2, idx3)
+        has_ghost = any(a in ghosts for a in atoms)
+        has_physical = any(a not in ghosts for a in atoms)
+
+        if has_ghost and has_physical:
+            dih_idx_str = ",".join(str(a.value()) for a in atoms)
+            if soften_anchors > 0.0:
+                scaled = p.function() * soften_anchors
+                new_dihedrals.set(idx0, idx1, idx2, idx3, scaled)
+                _logger.debug(
+                    f"  Softening mixed dihedral: [{dih_idx_str}], "
+                    f"scale={soften_anchors}"
+                )
+                modifications[mod_key]["softened_dihedrals"].append(dih_idx_str)
+            else:
+                _logger.debug(
+                    f"  Removing mixed dihedral: [{dih_idx_str}], {p.function()}"
+                )
+                modifications[mod_key]["removed_dihedrals"].append(dih_idx_str)
+            modified = True
+        else:
+            new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+    # Set the updated dihedrals.
+    if modified:
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
+        n_softened = len(modifications[mod_key]["softened_dihedrals"])
+        lam = f"{_lam_sym}={int(is_lambda1)}"
+        if soften_anchors > 0.0:
+            _logger.info(
+                f"Softened {n_softened} mixed ghost/physical dihedrals at "
+                f"{lam} (scale={soften_anchors})"
+            )
+        else:
+            _logger.info(f"Removed all mixed ghost/physical dihedrals at {lam}")
 
     # Return the updated molecule.
     return mol
