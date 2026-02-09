@@ -74,7 +74,7 @@ You may also need to install other packages from source, e.g.
 [BioSimSpace](https://github.com/OpenBioSim/biosimspace):
 
 ```
-pip install -e /path/to/biosimspace/python
+pip install -e /path/to/biosimspace
 ```
 
 Then install `ghostly` into the environment:
