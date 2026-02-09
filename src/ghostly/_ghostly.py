@@ -520,7 +520,7 @@ def _select_anchor(mol, candidates, bridge_indices):
                 break  # Can't do better.
 
     if best != candidates[0]:
-        _logger.info(
+        _logger.debug(
             f"  Anchor selection: chose atom {best.value()} over "
             f"{candidates[0].value()} (avoiding bridge/transmuting atom)"
         )
@@ -1902,12 +1902,12 @@ def _soften_mixed_dihedrals(
         n_softened = len(modifications[mod_key]["softened_dihedrals"])
         lam = f"{_lam_sym}={int(is_lambda1)}"
         if soften_anchors > 0.0:
-            _logger.info(
+            _logger.debug(
                 f"Softened {n_softened} mixed ghost/physical dihedrals at "
                 f"{lam} (scale={soften_anchors})"
             )
         else:
-            _logger.info(f"Removed all mixed ghost/physical dihedrals at {lam}")
+            _logger.debug(f"Removed all mixed ghost/physical dihedrals at {lam}")
 
     # Return the updated molecule.
     return mol
