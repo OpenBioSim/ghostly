@@ -236,6 +236,10 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
 
         # Now process the bridges.
 
+        # Compute the set of bridge atom indices for anchor selection.
+        bridge_indices0 = set(b.value() for b in bridges0)
+        bridge_indices1 = set(b.value() for b in bridges1)
+
         # First lambda = 0.
         for b in bridges0:
             # Determine the type of junction.
@@ -244,7 +248,13 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
             # Terminal junction.
             if junction == 1:
                 mol = _terminal(
-                    mol, b, bridges0[b], physical0[b], connectivity0, modifications
+                    mol,
+                    b,
+                    bridges0[b],
+                    physical0[b],
+                    connectivity0,
+                    modifications,
+                    bridge_indices=bridge_indices0,
                 )
 
             # Dual junction.
@@ -320,6 +330,7 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
                     connectivity1,
                     modifications,
                     is_lambda1=True,
+                    bridge_indices=bridge_indices1,
                 )
 
             elif junction == 2:
@@ -390,8 +401,84 @@ def modify(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
     return system, modifications
 
 
+def _select_anchor(mol, candidates, bridge_indices):
+    """
+    Select the best anchor atom from physical2 candidates for a terminal
+    junction.
+
+    The anchor atom is retained to constrain the ghost group's rotation via
+    surviving anchor dihedrals. A poor choice (e.g. a transmuting bridge atom)
+    can couple independent ghost groups or tie ghost constraints to element
+    transmutations.
+
+    Candidates are scored (lower is better):
+
+        0 - not a bridge, not transmuting (ideal)
+        1 - transmuting but not a bridge
+        2 - bridge but not transmuting
+        3 - both bridge and transmuting (worst)
+
+    Ties are broken by atom index (lowest first), preserving the previous
+    ``physical2[0]`` behaviour when all candidates score equally.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    candidates : List[sire.legacy.Mol.AtomIdx]
+        The physical2 candidates, sorted by atom index.
+
+    bridge_indices : set of int
+        The atom index values of all bridge atoms at the current end state.
+
+    Returns
+    -------
+
+    anchor : sire.legacy.Mol.AtomIdx
+        The best candidate to use as anchor.
+    """
+
+    best = candidates[0]
+    best_score = 3  # worst possible
+
+    for cand in candidates:
+        score = 0
+
+        # Penalise bridge atoms (couples ghost groups).
+        if cand.value() in bridge_indices:
+            score += 2
+
+        # Penalise transmuting atoms (unstable reference frame).
+        atom = mol.atom(cand)
+        if atom.property("element0").symbol() != atom.property("element1").symbol():
+            score += 1
+
+        if score < best_score:
+            best_score = score
+            best = cand
+            if score == 0:
+                break  # Can't do better.
+
+    if best != candidates[0]:
+        _logger.info(
+            f"  Anchor selection: chose atom {best.value()} over "
+            f"{candidates[0].value()} (avoiding bridge/transmuting atom)"
+        )
+
+    return best
+
+
 def _terminal(
-    mol, bridge, ghosts, physical, connectivity, modifications, is_lambda1=False
+    mol,
+    bridge,
+    ghosts,
+    physical,
+    connectivity,
+    modifications,
+    is_lambda1=False,
+    bridge_indices=None,
 ):
     r"""
     Apply modifications to a terminal junction.
@@ -430,6 +517,12 @@ def _terminal(
 
     is_lambda1 : bool, optional
         Whether the junction is at lambda = 1.
+
+    bridge_indices : set of int, optional
+        The atom index values of all bridge atoms at the current end state.
+        Used by ``_select_anchor`` to avoid choosing bridge or transmuting
+        atoms as anchors. When ``None``, falls back to first-by-index
+        selection.
 
     Returns
     -------
@@ -475,9 +568,15 @@ def _terminal(
     # Initialise a container to store the updated dihedrals.
     new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
 
-    # Remove all dihedral terms for all but one of the physical atoms two atoms
-    # from the physical bridge atom.
-    physical2.pop(0)
+    # Select the best anchor atom and remove it from the list. Dihedrals
+    # through the remaining physical2 atoms will be removed; dihedrals through
+    # the anchor are kept to constrain the ghost group's orientation.
+    if bridge_indices is not None and len(physical2) > 1:
+        anchor = _select_anchor(mol, physical2, bridge_indices)
+    else:
+        anchor = physical2[0]
+    physical2.remove(anchor)
+    _logger.debug(f"  Anchor atom: {anchor.value()}")
     for p in dihedrals.potentials():
         idx0 = info.atom_idx(p.atom0())
         idx1 = info.atom_idx(p.atom1())
