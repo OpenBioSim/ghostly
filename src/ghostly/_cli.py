@@ -139,7 +139,7 @@ def run():
         help="""
              Scale factor for surviving mixed ghost/physical dihedral force
              constants. 1.0 keeps the original force constants (Boresch
-             approach). 0.0 removes all mixed dihedrals entirely (old
+             approach). 0.0 removes all mixed dihedrals entirely (SOMD1
              scheme). Intermediate values (e.g. 0.5) scale the force
              constants, reducing the constraint on ghost group orientation.
              Softening can prevent dynamics crashes at small lambda for

@@ -86,7 +86,7 @@ def modify(
         constants. Applied as a post-processing step after all per-bridge
         junction handlers and residual removal passes. A value of 1.0
         (default) keeps the original force constants (Boresch approach).
-        A value of 0.0 removes all mixed dihedrals entirely (old scheme).
+        A value of 0.0 removes all mixed dihedrals entirely (SOMD1 scheme).
         Intermediate values (e.g. 0.5) scale the force constants, reducing
         the constraint on ghost group orientation while preserving the
         thermodynamic correction. Softening can prevent dynamics crashes
