@@ -594,6 +594,10 @@ def _terminal(
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
+
     # Store the molecular info.
     info = mol.info()
 
@@ -726,6 +730,10 @@ def _dual(
         f"Applying modifications to dual ghost junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
+
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
 
     # Store the molecular info.
     info = mol.info()
@@ -988,6 +996,10 @@ def _triple(
         f"Applying modifications to triple ghost junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
+
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
 
     # Store the molecular info.
     info = mol.info()
@@ -1387,6 +1399,10 @@ def _higher(
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
+
     # Store the molecular info.
     info = mol.info()
 
@@ -1537,6 +1553,10 @@ def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
     mol : sire.mol.Molecule
         The updated molecule.
     """
+
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
 
     # Store the molecular info.
     info = mol.info()
