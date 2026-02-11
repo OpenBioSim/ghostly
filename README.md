@@ -91,6 +91,24 @@ You should now have a `ghostly` executable in your path. To test, run:
 ghostly --help
 ```
 
+## Development
+
+Pre-commit hooks are used to ensure consistent code formatting and linting.
+To set up pre-commit in your development environment:
+
+```
+pixi shell -e dev
+pre-commit install
+```
+
+This will run [ruff](https://docs.astral.sh/ruff/) formatting and linting
+checks automatically on each commit. To run the checks manually against all
+files:
+
+```
+pre-commit run --all-files
+```
+
 ## Usage
 
 Ghostly requires topology and coordinate files for the reference and perturbed molecules
