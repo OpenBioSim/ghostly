@@ -55,12 +55,9 @@ def test_hexane_to_propane():
     )
 
     # Check that the missing dihedrals are not in the new dihedrals.
-    assert (
-        all(
-            check_dihedral(info, new_dihedrals.potentials(), *dihedral)
-            for dihedral in missing_dihedrals
-        )
-        == False
+    assert not all(
+        check_dihedral(info, new_dihedrals.potentials(), *dihedral)
+        for dihedral in missing_dihedrals
     )
 
 
@@ -108,21 +105,15 @@ def test_toluene_to_pyridine():
     info = mols[0].info()
 
     # Check that the missing dihedrals are in the original dihedrals.
-    assert (
-        all(
-            check_dihedral(info, dihedrals.potentials(), *dihedral)
-            for dihedral in missing_dihedrals
-        )
-        == True
+    assert all(
+        check_dihedral(info, dihedrals.potentials(), *dihedral)
+        for dihedral in missing_dihedrals
     )
 
     # Check that the missing dihedrals are not in the new dihedrals.
-    assert (
-        all(
-            check_dihedral(info, new_dihedrals.potentials(), *dihedral)
-            for dihedral in missing_dihedrals
-        )
-        == False
+    assert not all(
+        check_dihedral(info, new_dihedrals.potentials(), *dihedral)
+        for dihedral in missing_dihedrals
     )
 
     # Create a list of angle IDs for the modified angles.
@@ -202,21 +193,15 @@ def test_acetone_to_propenol():
     info = mols[0].info()
 
     # Check that the missing dihedrals are in the original dihedrals at lambda = 0.
-    assert (
-        all(
-            check_dihedral(info, dihedrals0.potentials(), *dihedral)
-            for dihedral in missing_dihedrals0
-        )
-        == True
+    assert all(
+        check_dihedral(info, dihedrals0.potentials(), *dihedral)
+        for dihedral in missing_dihedrals0
     )
 
     # Check that the missing dihedrals are not in the new dihedrals at lambda = 0.
-    assert (
-        all(
-            check_dihedral(info, new_dihedrals0.potentials(), *dihedral)
-            for dihedral in missing_dihedrals0
-        )
-        == False
+    assert not all(
+        check_dihedral(info, new_dihedrals0.potentials(), *dihedral)
+        for dihedral in missing_dihedrals0
     )
 
     # Create dihedral IDs for the missing dihedrals at lambda = 1.
@@ -226,21 +211,15 @@ def test_acetone_to_propenol():
     ]
 
     # Check that the missing dihedrals are in the original dihedrals at lambda = 1.
-    assert (
-        all(
-            check_dihedral(info, dihedrals1.potentials(), *dihedral)
-            for dihedral in missing_dihedrals1
-        )
-        == True
+    assert all(
+        check_dihedral(info, dihedrals1.potentials(), *dihedral)
+        for dihedral in missing_dihedrals1
     )
 
     # Check that the missing dihedrals are not in the new dihedrals at lambda = 1.
-    assert (
-        all(
-            check_dihedral(info, new_dihedrals1.potentials(), *dihedral)
-            for dihedral in missing_dihedrals1
-        )
-        == False
+    assert not all(
+        check_dihedral(info, new_dihedrals1.potentials(), *dihedral)
+        for dihedral in missing_dihedrals1
     )
 
     # Create angle IDs for the removed angles at lambda = 1.
@@ -249,18 +228,13 @@ def test_acetone_to_propenol():
     ]
 
     # Check that the removed angles are in the original angles at lambda = 1.
-    assert (
-        all(check_angle(info, angles1.potentials(), *angle) for angle in removed_angles)
-        == True
+    assert all(
+        check_angle(info, angles1.potentials(), *angle) for angle in removed_angles
     )
 
     # Check that the removed angles are not in the new angles at lambda = 1.
-    assert (
-        all(
-            check_angle(info, new_angles1.potentials(), *angle)
-            for angle in removed_angles
-        )
-        == False
+    assert not all(
+        check_angle(info, new_angles1.potentials(), *angle) for angle in removed_angles
     )
 
     # Create angle IDs for the modified angles at lambda = 1.
@@ -355,21 +329,15 @@ def test_ejm49_to_ejm31():
     info = mols[0].info()
 
     # Check that the missing dihedrals are in the original dihedrals at lambda = 0.
-    assert (
-        all(
-            check_dihedral(info, dihedrals0.potentials(), *dihedral)
-            for dihedral in missing_dihedrals0
-        )
-        == True
+    assert all(
+        check_dihedral(info, dihedrals0.potentials(), *dihedral)
+        for dihedral in missing_dihedrals0
     )
 
     # Check that the missing dihedrals are not in the new dihedrals at lambda = 0.
-    assert (
-        all(
-            check_dihedral(info, new_dihedrals0.potentials(), *dihedral)
-            for dihedral in missing_dihedrals0
-        )
-        == False
+    assert not all(
+        check_dihedral(info, new_dihedrals0.potentials(), *dihedral)
+        for dihedral in missing_dihedrals0
     )
 
     # Create dihedral IDs for the missing dihedrals at lambda = 1.
@@ -381,21 +349,15 @@ def test_ejm49_to_ejm31():
     ]
 
     # Check that the missing dihedrals are in the original dihedrals at lambda = 1.
-    assert (
-        all(
-            check_dihedral(info, dihedrals1.potentials(), *dihedral)
-            for dihedral in missing_dihedrals1
-        )
-        == True
+    assert all(
+        check_dihedral(info, dihedrals1.potentials(), *dihedral)
+        for dihedral in missing_dihedrals1
     )
 
     # Check that the missing dihedrals are not in the new dihedrals at lambda = 1.
-    assert (
-        all(
-            check_dihedral(info, new_dihedrals1.potentials(), *dihedral)
-            for dihedral in missing_dihedrals1
-        )
-        == False
+    assert not all(
+        check_dihedral(info, new_dihedrals1.potentials(), *dihedral)
+        for dihedral in missing_dihedrals1
     )
 
     # Create angle IDs for the modified angles at lambda = 0.
@@ -457,21 +419,15 @@ def test_ejm49_to_ejm31():
     ]
 
     # Check that the missing impropers are in the original impropers at lambda = 0.
-    assert (
-        all(
-            check_improper(info, improper0.potentials(), *improper)
-            for improper in missing_impropers0
-        )
-        == True
+    assert all(
+        check_improper(info, improper0.potentials(), *improper)
+        for improper in missing_impropers0
     )
 
     # Check that the missing impropers are not in the new impropers at lambda = 0.
-    assert (
-        all(
-            check_improper(info, new_improper0.potentials(), *improper)
-            for improper in missing_impropers0
-        )
-        == False
+    assert not all(
+        check_improper(info, new_improper0.potentials(), *improper)
+        for improper in missing_impropers0
     )
 
     # Create improper IDs for the missing impropers at lambda = 1.
@@ -486,21 +442,15 @@ def test_ejm49_to_ejm31():
     ]
 
     # Check that the missing impropers are in the original impropers at lambda = 1.
-    assert (
-        all(
-            check_improper(info, improper1.potentials(), *improper)
-            for improper in missing_impropers1
-        )
-        == True
+    assert all(
+        check_improper(info, improper1.potentials(), *improper)
+        for improper in missing_impropers1
     )
 
     # Check that the missing impropers are not in the new impropers at lambda = 1.
-    assert (
-        all(
-            check_improper(info, new_improper1.potentials(), *improper)
-            for improper in missing_impropers1
-        )
-        == False
+    assert not all(
+        check_improper(info, new_improper1.potentials(), *improper)
+        for improper in missing_impropers1
     )
 
 
