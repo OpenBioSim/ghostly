@@ -32,7 +32,6 @@ tests:
       - pytest -vvv --color=yes --import-mode=importlib ./tests
     files:
       source:
-        - src/ghostly/
         - tests/
     requirements:
       run:
