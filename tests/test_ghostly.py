@@ -123,7 +123,8 @@ def test_toluene_to_pyridine():
     ]
 
     # Functional form of the modified angles.
-    expression = "100 [theta - 1.5708]^2"
+    # Bridge atom 1 is in a ring, so k_hard_ring (75) is used.
+    expression = "75 [theta - 1.5708]^2"
 
     # Check that the original angles don't have the modified functional form.
     for p in angles.potentials():
@@ -223,8 +224,9 @@ def test_acetone_to_propenol():
     )
 
     # Create angle IDs for the removed angles at lambda = 1.
+    # Atom 9 is transmuting (worst score), so it is the sacrificial atom.
     removed_angles = [
-        (AtomIdx(1), AtomIdx(3), AtomIdx(7)),
+        (AtomIdx(7), AtomIdx(3), AtomIdx(9)),
     ]
 
     # Check that the removed angles are in the original angles at lambda = 1.
@@ -239,8 +241,8 @@ def test_acetone_to_propenol():
 
     # Create angle IDs for the modified angles at lambda = 1.
     modified_angles = [
+        (AtomIdx(1), AtomIdx(3), AtomIdx(7)),
         (AtomIdx(7), AtomIdx(3), AtomIdx(8)),
-        (AtomIdx(7), AtomIdx(3), AtomIdx(9)),
     ]
 
     # Functional form of the modified angles.

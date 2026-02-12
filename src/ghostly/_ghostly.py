@@ -47,6 +47,7 @@ del _platform
 def modify(
     system,
     k_hard=100,
+    k_hard_ring=75,
     k_soft=5,
     optimise_angles=True,
     num_optimise=10,
@@ -67,6 +68,13 @@ def modify(
     k_hard : float, optional
         The force constant to use to when setting angle terms involving ghost
         atoms to 90 degrees to avoid flapping. (In kcal/mol/rad^2)
+
+    k_hard_ring : float, optional
+        The force constant to use when setting angle terms involving ghost
+        atoms to 90 degrees for bridge atoms that are in a ring. Ring bridges
+        suffer strain from the 90 degree target fighting the natural ring
+        geometry (~110 degrees). A lower force constant reduces this strain
+        while still preventing flapping. (In kcal/mol/rad^2)
 
     k_soft : float, optional
         The force constant to use when setting angle terms involving ghost atoms
@@ -149,7 +157,7 @@ def modify(
     modifications["lambda_0"] = {
         "removed_angles": [],
         "removed_dihedrals": [],
-        "stiffened_angles": [],
+        "stiffened_angles": {},
         "softened_angles": {},
         "softened_dihedrals": [],
         "stiffened_dihedrals": [],
@@ -157,7 +165,7 @@ def modify(
     modifications["lambda_1"] = {
         "removed_angles": [],
         "removed_dihedrals": [],
-        "stiffened_angles": [],
+        "stiffened_angles": {},
         "softened_angles": {},
         "softened_dihedrals": [],
         "stiffened_dihedrals": [],
@@ -293,6 +301,8 @@ def modify(
                     connectivity0,
                     modifications,
                     k_hard=k_hard,
+                    k_hard_ring=k_hard_ring,
+                    bridge_indices=bridge_indices0,
                 )
 
             # Triple junction.
@@ -305,9 +315,11 @@ def modify(
                     connectivity0,
                     modifications,
                     k_hard=k_hard,
+                    k_hard_ring=k_hard_ring,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
                     num_optimise=num_optimise,
+                    bridge_indices=bridge_indices0,
                 )
 
             # Higher order junction.
@@ -384,7 +396,9 @@ def modify(
                     connectivity1,
                     modifications,
                     k_hard=k_hard,
+                    k_hard_ring=k_hard_ring,
                     is_lambda1=True,
+                    bridge_indices=bridge_indices1,
                 )
 
             elif junction == 3:
@@ -396,10 +410,12 @@ def modify(
                     connectivity1,
                     modifications,
                     k_hard=k_hard,
+                    k_hard_ring=k_hard_ring,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
                     num_optimise=num_optimise,
                     is_lambda1=True,
+                    bridge_indices=bridge_indices1,
                 )
 
             # Higher order junction.
@@ -459,6 +475,50 @@ def modify(
     return system, modifications
 
 
+def _score_atom(mol, atom, bridge_indices):
+    """
+    Score an atom based on its bridge and transmuting status.
+
+    Lower scores are better:
+
+        0 - not a bridge, not transmuting (ideal)
+        1 - transmuting but not a bridge
+        2 - bridge but not transmuting
+        3 - both bridge and transmuting (worst)
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    atom : sire.legacy.Mol.AtomIdx
+        The atom to score.
+
+    bridge_indices : set of int
+        The atom index values of all bridge atoms at the current end state.
+
+    Returns
+    -------
+
+    score : int
+        The score (0-3).
+    """
+
+    score = 0
+
+    # Penalise bridge atoms (couples ghost groups).
+    if atom.value() in bridge_indices:
+        score += 2
+
+    # Penalise transmuting atoms (unstable reference frame).
+    a = mol.atom(atom)
+    if a.property("element0").symbol() != a.property("element1").symbol():
+        score += 1
+
+    return score
+
+
 def _select_anchor(mol, candidates, bridge_indices):
     """
     Select the best anchor atom from physical2 candidates for a terminal
@@ -469,13 +529,7 @@ def _select_anchor(mol, candidates, bridge_indices):
     can couple independent ghost groups or tie ghost constraints to element
     transmutations.
 
-    Candidates are scored (lower is better):
-
-        0 - not a bridge, not transmuting (ideal)
-        1 - transmuting but not a bridge
-        2 - bridge but not transmuting
-        3 - both bridge and transmuting (worst)
-
+    Candidates are scored using ``_score_atom()`` (lower is better).
     Ties are broken by atom index (lowest first), preserving the previous
     ``physical2[0]`` behaviour when all candidates score equally.
 
@@ -502,16 +556,7 @@ def _select_anchor(mol, candidates, bridge_indices):
     best_score = 3  # worst possible
 
     for cand in candidates:
-        score = 0
-
-        # Penalise bridge atoms (couples ghost groups).
-        if cand.value() in bridge_indices:
-            score += 2
-
-        # Penalise transmuting atoms (unstable reference frame).
-        atom = mol.atom(cand)
-        if atom.property("element0").symbol() != atom.property("element1").symbol():
-            score += 1
+        score = _score_atom(mol, cand, bridge_indices)
 
         if score < best_score:
             best_score = score
@@ -675,7 +720,9 @@ def _dual(
     connectivity,
     modifications,
     k_hard=100,
+    k_hard_ring=75,
     is_lambda1=False,
+    bridge_indices=None,
 ):
     r"""
     Apply modifications to a dual junction.
@@ -716,8 +763,16 @@ def _dual(
         The force constant to use when setting angle terms involving ghost
         atoms to 90 degrees to avoid flapping. (In kcal/mol/rad^2)
 
+    k_hard_ring : float, optional
+        The force constant to use when the bridge atom is in a ring, where
+        the 90 degree target fights the natural ring geometry. (In kcal/mol/rad^2)
+
     is_lambda1 : bool, optional
         Whether the junction is at lambda = 1.
+
+    bridge_indices : set of int, optional
+        The atom index values of all bridge atoms at the current end state.
+        Used to score physical neighbours.
 
     Returns
     -------
@@ -745,6 +800,34 @@ def _dual(
     else:
         mod_key = "lambda_0"
         suffix = "0"
+
+    # Check if the bridge atom is in a ring using RDKit.
+    if is_lambda1:
+        end_state_mol = _morph.link_to_perturbed(mol)
+    else:
+        end_state_mol = _morph.link_to_reference(mol)
+
+    from sire.convert import to_rdkit
+
+    try:
+        rdmol = to_rdkit(end_state_mol)
+    except Exception:
+        rdmol = None
+
+    bridge_in_ring = (
+        rdmol is not None and rdmol.GetAtomWithIdx(bridge.value()).IsInRing()
+    )
+
+    # Score the physical neighbours.
+    if bridge_indices is not None:
+        phys_scores = {p: _score_atom(mol, p, bridge_indices) for p in physical}
+        best_phys_score = min(phys_scores.values())
+    else:
+        phys_scores = None
+        best_phys_score = 0
+
+    # Choose the force constant for angle stiffening.
+    k = k_hard_ring if bridge_in_ring else k_hard
 
     # Single branch.
     if len(ghosts) == 1:
@@ -807,13 +890,27 @@ def _dual(
                 or idx0 in physical
                 and idx2 in ghosts
             ):
+                # Identify the physical atom in this angle.
+                phys_atom = idx2 if idx0 in ghosts else idx0
+
+                # Skip stiffening through poorly-scoring atoms if better ones exist.
+                if phys_scores is not None and phys_scores[phys_atom] > best_phys_score:
+                    new_angles.set(idx0, idx1, idx2, p.function())
+                    _logger.debug(
+                        f"  Skipping stiffening for angle "
+                        f"[{idx0.value()}-{idx1.value()}-{idx2.value()}]: "
+                        f"physical atom {phys_atom.value()} scores "
+                        f"{phys_scores[phys_atom]} (transmuting/bridge)"
+                    )
+                    continue
+
                 from math import pi
                 from sire.legacy.CAS import Symbol
 
                 theta0 = pi / 2.0
 
                 # Create the new angle function.
-                amber_angle = _SireMM.AmberAngle(k_hard, theta0)
+                amber_angle = _SireMM.AmberAngle(k, theta0)
 
                 # Generate the new angle expression.
                 expression = amber_angle.to_expression(Symbol("theta"))
@@ -826,8 +923,10 @@ def _dual(
                     f"{p.function()} --> {expression}"
                 )
 
-                ang_idx = (idx0.value(), idx1.value(), idx2.value())
-                modifications[mod_key]["stiffened_angles"].append(ang_idx)
+                ang_idx = ",".join(
+                    [str(i) for i in (idx0.value(), idx1.value(), idx2.value())]
+                )
+                modifications[mod_key]["stiffened_angles"][ang_idx] = {"k": k}
 
             else:
                 new_angles.set(idx0, idx1, idx2, p.function())
@@ -912,7 +1011,9 @@ def _dual(
                 connectivity,
                 modifications,
                 k_hard=k_hard,
+                k_hard_ring=k_hard_ring,
                 is_lambda1=is_lambda1,
+                bridge_indices=bridge_indices,
             )
 
     # Return the updated molecule.
@@ -927,10 +1028,12 @@ def _triple(
     connectivity,
     modifications,
     k_hard=100,
+    k_hard_ring=75,
     k_soft=5,
     optimise_angles=True,
     num_optimise=10,
     is_lambda1=False,
+    bridge_indices=None,
 ):
     r"""
     Apply modifications to a triple junction.
@@ -970,6 +1073,10 @@ def _triple(
         The force constant to use when setting angle terms involving ghost
         atoms to 90 degrees to avoid flapping. (In kcal/mol/rad^2)
 
+    k_hard_ring : float, optional
+        The force constant to use when the bridge atom is in a ring, where
+        the 90 degree target fights the natural ring geometry. (In kcal/mol/rad^2)
+
     k_soft : float, optional
         The force constant to use when setting angle terms involving ghost
         atoms for non-planar triple junctions. (In kcal/mol/rad^2)
@@ -984,6 +1091,10 @@ def _triple(
 
     is_lambda1 : bool, optional
         Whether the junction is at lambda = 1.
+
+    bridge_indices : set of int, optional
+        The atom index values of all bridge atoms at the current end state.
+        Used to score physical neighbours.
 
     Returns
     -------
@@ -1025,8 +1136,10 @@ def _triple(
         _logger.error(msg)
         raise RuntimeError(msg)
 
-    # Get the hybridisation of the bridge atom.
-    hybridisation = rdmol.GetAtomWithIdx(bridge.value()).GetHybridization()
+    # Get the hybridisation and ring membership of the bridge atom.
+    bridge_rdatom = rdmol.GetAtomWithIdx(bridge.value())
+    hybridisation = bridge_rdatom.GetHybridization()
+    bridge_in_ring = bridge_rdatom.IsInRing()
 
     # Warn if the hybridisation is unspecified.
     if hybridisation in (HybridizationType.UNSPECIFIED, HybridizationType.OTHER):
@@ -1034,6 +1147,14 @@ def _triple(
             f"Unspecified hybridisation for bridge atom {bridge.value()} "
             f"at {_lam_sym} = {int(is_lambda1)}. Defaulting to planar junction."
         )
+
+    # Score the physical neighbours.
+    if bridge_indices is not None:
+        phys_scores = {p: _score_atom(mol, p, bridge_indices) for p in physical}
+        best_phys_score = min(phys_scores.values())
+    else:
+        phys_scores = None
+        best_phys_score = 0
 
     # Non-planar junction.
     if hybridisation in (
@@ -1066,6 +1187,20 @@ def _triple(
                 or idx2 in ghosts
                 and idx0 in physical
             ):
+                # Identify the physical atom in this angle.
+                phys_atom = idx2 if idx0 in ghosts else idx0
+
+                # Skip softening through poorly-scoring atoms if better ones exist.
+                if phys_scores is not None and phys_scores[phys_atom] > best_phys_score:
+                    new_angles.set(idx0, idx1, idx2, p.function())
+                    _logger.debug(
+                        f"  Skipping softening for angle "
+                        f"[{idx0.value()}-{idx1.value()}-{idx2.value()}]: "
+                        f"physical atom {phys_atom.value()} scores "
+                        f"{phys_scores[phys_atom]} (transmuting/bridge)"
+                    )
+                    continue
+
                 from sire.legacy.CAS import Symbol
 
                 theta = Symbol("theta")
@@ -1258,8 +1393,17 @@ def _triple(
         # First remove all bonded terms between one of the physical atoms
         # and the ghost group.
 
-        # Store the index of the first physical atom.
-        idx = physical[0]
+        # Choose the worst-scoring physical atom as the sacrificial one.
+        if phys_scores is not None:
+            idx = max(physical, key=lambda p: (phys_scores[p], p.value()))
+            if idx != physical[0]:
+                _logger.debug(
+                    f"  Sacrificial atom selection: chose atom {idx.value()} "
+                    f"over {physical[0].value()} (worst score "
+                    f"{phys_scores[idx]})"
+                )
+        else:
+            idx = physical[0]
 
         # Get the end state bond functions.
         angles = mol.property("angle" + suffix)
@@ -1316,15 +1460,18 @@ def _triple(
         )
 
         # Next we treat the remaining terms as a dual junction.
+        remaining_physical = [p for p in physical if p != idx]
         mol = _dual(
             mol,
             bridge,
             ghosts,
-            physical[1:],
+            remaining_physical,
             connectivity,
             modifications,
             k_hard=k_hard,
+            k_hard_ring=k_hard_ring,
             is_lambda1=is_lambda1,
+            bridge_indices=bridge_indices,
         )
 
     # Return the updated molecule.
