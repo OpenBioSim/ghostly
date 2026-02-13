@@ -74,8 +74,11 @@ def test_toluene_to_pyridine():
     angles = mols[0].property("angle1")
     dihedrals = mols[0].property("dihedral1")
 
+    # Force constant for stiffening angles where the bridge atom is in a ring.
+    k_kard_ring = 75
+
     # Apply the ghost atom modifications.
-    new_mols, _ = modify(mols)
+    new_mols, _ = modify(mols, k_hard_ring=k_kard_ring)
 
     # Get the new angles and dihedrals.
     new_angles = new_mols[0].property("angle1")
@@ -124,7 +127,7 @@ def test_toluene_to_pyridine():
 
     # Functional form of the modified angles.
     # Bridge atom 1 is in a ring, so k_hard_ring (75) is used.
-    expression = "75 [theta - 1.5708]^2"
+    expression = f"{k_kard_ring} [theta - 1.5708]^2"
 
     # Check that the original angles don't have the modified functional form.
     for p in angles.potentials():
@@ -161,8 +164,11 @@ def test_acetone_to_propenol():
     dihedrals0 = mols[0].property("dihedral0")
     dihedrals1 = mols[0].property("dihedral1")
 
+    # Force constant for stiffening angles.
+    k_hard = 100
+
     # Apply the ghost atom modifications.
-    new_mols, _ = modify(mols)
+    new_mols, _ = modify(mols, k_hard=k_hard)
 
     # Get the new angles and dihedrals.
     new_angles0 = new_mols[0].property("angle0")
@@ -246,7 +252,7 @@ def test_acetone_to_propenol():
     ]
 
     # Functional form of the modified angles.
-    expression = "100 [theta - 1.5708]^2"
+    expression = f"{k_hard} [theta - 1.5708]^2"
 
     # Check that the original angles don't have the modified functional form.
     for p in angles1.potentials():
