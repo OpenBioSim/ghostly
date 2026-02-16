@@ -208,16 +208,25 @@ def modify(
                         bridges0[c].append(ghost)
         # Work out the indices of the other physical atoms that are connected to
         # the bridge atoms, sorted by the atom index. These are "core" physical
-        # atoms, i.e. they are physical in both end states.
+        # atoms, i.e. they are physical in both end states and are not
+        # themselves bridge atoms. Other bridges are not stable anchors for
+        # junction classification since they have their own ghost connections.
         physical0 = {}
+        bridge_idx_set0 = set(b.value() for b in bridges0)
         for b in bridges0:
-            physical0[b] = []
+            all_phys = []
+            non_bridge_phys = []
             for c in connectivity0.connections_to(b):
                 if (
                     not _is_ghost(mol, [c])[0]
                     and not _is_ghost(mol, [c], is_lambda1=True)[0]
                 ):
-                    physical0[b].append(c)
+                    all_phys.append(c)
+                    if c.value() not in bridge_idx_set0:
+                        non_bridge_phys.append(c)
+            # Prefer non-bridge physical neighbours, but fall back to
+            # including bridges if they are the only anchors available.
+            physical0[b] = non_bridge_phys if non_bridge_phys else all_phys
         for b in physical0:
             physical0[b].sort(key=lambda x: x.value())
 
@@ -231,14 +240,19 @@ def modify(
                     else:
                         bridges1[c].append(ghost)
         physical1 = {}
+        bridge_idx_set1 = set(b.value() for b in bridges1)
         for b in bridges1:
-            physical1[b] = []
+            all_phys = []
+            non_bridge_phys = []
             for c in connectivity1.connections_to(b):
                 if (
                     not _is_ghost(mol, [c])[0]
                     and not _is_ghost(mol, [c], is_lambda1=True)[0]
                 ):
-                    physical1[b].append(c)
+                    all_phys.append(c)
+                    if c.value() not in bridge_idx_set1:
+                        non_bridge_phys.append(c)
+            physical1[b] = non_bridge_phys if non_bridge_phys else all_phys
         for b in physical1:
             physical1[b].sort(key=lambda x: x.value())
 
