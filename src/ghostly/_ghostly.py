@@ -208,25 +208,33 @@ def modify(
                         bridges0[c].append(ghost)
         # Work out the indices of the other physical atoms that are connected to
         # the bridge atoms, sorted by the atom index. These are "core" physical
-        # atoms, i.e. they are physical in both end states and are not
-        # themselves bridge atoms. Other bridges are not stable anchors for
-        # junction classification since they have their own ghost connections.
+        # atoms, i.e. they are physical in both end states. Bridge atoms that
+        # share a ghost with the current bridge are excluded: they couple
+        # through the shared ghost and are not independent anchors. Bridge atoms
+        # that do NOT share a ghost are retained since they anchor independent
+        # ghost groups and are needed for proper junction classification.
         physical0 = {}
-        bridge_idx_set0 = set(b.value() for b in bridges0)
         for b in bridges0:
+            # Build the set of bridge atoms that share a ghost with b.
+            shared_ghost_bridges = set()
+            for b2, ghosts2 in bridges0.items():
+                if b2 != b and set(bridges0[b]) & set(ghosts2):
+                    shared_ghost_bridges.add(b2.value())
             all_phys = []
-            non_bridge_phys = []
+            non_shared_bridge_phys = []
             for c in connectivity0.connections_to(b):
                 if (
                     not _is_ghost(mol, [c])[0]
                     and not _is_ghost(mol, [c], is_lambda1=True)[0]
                 ):
                     all_phys.append(c)
-                    if c.value() not in bridge_idx_set0:
-                        non_bridge_phys.append(c)
-            # Prefer non-bridge physical neighbours, but fall back to
-            # including bridges if they are the only anchors available.
-            physical0[b] = non_bridge_phys if non_bridge_phys else all_phys
+                    if c.value() not in shared_ghost_bridges:
+                        non_shared_bridge_phys.append(c)
+            # Prefer excluding shared-ghost bridges, but fall back to
+            # including them if they are the only anchors available.
+            physical0[b] = (
+                non_shared_bridge_phys if non_shared_bridge_phys else all_phys
+            )
         for b in physical0:
             physical0[b].sort(key=lambda x: x.value())
 
@@ -240,19 +248,24 @@ def modify(
                     else:
                         bridges1[c].append(ghost)
         physical1 = {}
-        bridge_idx_set1 = set(b.value() for b in bridges1)
         for b in bridges1:
+            shared_ghost_bridges = set()
+            for b2, ghosts2 in bridges1.items():
+                if b2 != b and set(bridges1[b]) & set(ghosts2):
+                    shared_ghost_bridges.add(b2.value())
             all_phys = []
-            non_bridge_phys = []
+            non_shared_bridge_phys = []
             for c in connectivity1.connections_to(b):
                 if (
                     not _is_ghost(mol, [c])[0]
                     and not _is_ghost(mol, [c], is_lambda1=True)[0]
                 ):
                     all_phys.append(c)
-                    if c.value() not in bridge_idx_set1:
-                        non_bridge_phys.append(c)
-            physical1[b] = non_bridge_phys if non_bridge_phys else all_phys
+                    if c.value() not in shared_ghost_bridges:
+                        non_shared_bridge_phys.append(c)
+            physical1[b] = (
+                non_shared_bridge_phys if non_shared_bridge_phys else all_phys
+            )
         for b in physical1:
             physical1[b].sort(key=lambda x: x.value())
 
@@ -836,9 +849,21 @@ def _dual(
     if bridge_indices is not None:
         phys_scores = {p: _score_atom(mol, p, bridge_indices) for p in physical}
         best_phys_score = min(phys_scores.values())
+
+        # Determine which physical atoms are heavy (non-hydrogen at either end state).
+        # We only skip a poorly-scoring atom when at least one heavy atom remains
+        # to provide an adequate structural anchor for ghost orientation.
+        def _is_heavy(atom_idx):
+            a = mol.atom(atom_idx)
+            e0 = a.property("element0").symbol()
+            e1 = a.property("element1").symbol()
+            return (e0 not in ("H", "Xx")) or (e1 not in ("H", "Xx"))
+
+        heavy_phys = {p for p in physical if _is_heavy(p)}
     else:
         phys_scores = None
         best_phys_score = 0
+        heavy_phys = set(physical)
 
     # Choose the force constant for angle stiffening.
     k = k_hard_ring if bridge_in_ring else k_hard
@@ -907,8 +932,15 @@ def _dual(
                 # Identify the physical atom in this angle.
                 phys_atom = idx2 if idx0 in ghosts else idx0
 
-                # Skip stiffening through poorly-scoring atoms if better ones exist.
-                if phys_scores is not None and phys_scores[phys_atom] > best_phys_score:
+                # Skip stiffening through poorly-scoring atoms if better ones
+                # exist AND at least one heavy atom would remain as anchor.
+                # Without a heavy anchor, the ghost is under-constrained.
+                other_heavy = heavy_phys - {phys_atom}
+                if (
+                    phys_scores is not None
+                    and phys_scores[phys_atom] > best_phys_score
+                    and other_heavy
+                ):
                     new_angles.set(idx0, idx1, idx2, p.function())
                     _logger.debug(
                         f"  Skipping stiffening for angle "
@@ -1166,9 +1198,18 @@ def _triple(
     if bridge_indices is not None:
         phys_scores = {p: _score_atom(mol, p, bridge_indices) for p in physical}
         best_phys_score = min(phys_scores.values())
+
+        def _is_heavy(atom_idx):
+            a = mol.atom(atom_idx)
+            e0 = a.property("element0").symbol()
+            e1 = a.property("element1").symbol()
+            return (e0 not in ("H", "Xx")) or (e1 not in ("H", "Xx"))
+
+        heavy_phys = {p for p in physical if _is_heavy(p)}
     else:
         phys_scores = None
         best_phys_score = 0
+        heavy_phys = set(physical)
 
     # Non-planar junction.
     if hybridisation in (
@@ -1204,8 +1245,14 @@ def _triple(
                 # Identify the physical atom in this angle.
                 phys_atom = idx2 if idx0 in ghosts else idx0
 
-                # Skip softening through poorly-scoring atoms if better ones exist.
-                if phys_scores is not None and phys_scores[phys_atom] > best_phys_score:
+                # Skip softening through poorly-scoring atoms if better ones
+                # exist AND at least one heavy atom would remain as anchor.
+                other_heavy = heavy_phys - {phys_atom}
+                if (
+                    phys_scores is not None
+                    and phys_scores[phys_atom] > best_phys_score
+                    and other_heavy
+                ):
                     new_angles.set(idx0, idx1, idx2, p.function())
                     _logger.debug(
                         f"  Skipping softening for angle "
