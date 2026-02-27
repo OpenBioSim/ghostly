@@ -36,7 +36,6 @@ def run():
 
     import argparse
     import json
-    import os
     import sys
 
     import BioSimSpace as BSS
@@ -101,6 +100,19 @@ def run():
     )
 
     parser.add_argument(
+        "--k-hard-ring",
+        type=str,
+        help="""
+             The force constant to use when setting angle terms involving ghost
+             atoms to 90 degrees for bridge atoms that are in a ring. A lower
+             value reduces strain where the 90 degree target fights the natural
+             ring geometry.
+             """,
+        default="75 kcal/mol/rad**2",
+        required=False,
+    )
+
+    parser.add_argument(
         "--k-soft",
         type=str,
         help="""
@@ -130,6 +142,48 @@ def run():
              ghost atoms for non-planar triple junctions.
              """,
         default=10,
+        required=False,
+    )
+
+    parser.add_argument(
+        "--soften-anchors",
+        type=float,
+        help="""
+             Scale factor for surviving mixed ghost/physical dihedral force
+             constants. 1.0 keeps the original force constants (Boresch
+             approach). 0.0 removes all mixed dihedrals entirely (SOMD1
+             scheme). Intermediate values (e.g. 0.5) scale the force
+             constants, reducing the constraint on ghost group orientation.
+             Softening can prevent dynamics crashes at small lambda for
+             complex perturbations, particularly with multiple ghost groups.
+             """,
+        default=1.0,
+        required=False,
+    )
+
+    parser.add_argument(
+        "--stiffen-rotamers",
+        action=argparse.BooleanOptionalAction,
+        help="""
+             Whether to replace rotamer anchor dihedrals with a stiff
+             single-well cosine potential. When a bridge-physical bond is
+             rotatable (not in a ring, sp3 bridge), surviving anchor
+             dihedrals can allow rotameric transitions of ghost atoms at
+             intermediate lambda.
+             """,
+        default=False,
+        required=False,
+    )
+
+    parser.add_argument(
+        "--k-rotamer",
+        type=str,
+        help="""
+             The force constant for the replacement cosine well when
+             stiffening rotamer anchor dihedrals. The resulting barrier
+             height is 2 * k_rotamer.
+             """,
+        default="50 kcal/mol",
         required=False,
     )
 
@@ -239,6 +293,12 @@ def run():
         sys.exit(1)
 
     try:
+        k_hard_ring = sr.u(args.k_hard_ring)
+    except Exception as e:
+        logger.error(f"An error occurred while parsing the k-hard-ring value: {e}")
+        sys.exit(1)
+
+    try:
         k_soft = sr.u(args.k_soft)
     except Exception as e:
         logger.error(f"An error occurred while parsing the k-soft value: {e}")
@@ -248,8 +308,28 @@ def run():
     if not k_hard.has_same_units(u):
         logger.error("k-hard must have units of kcal/mol/rad**2")
         sys.exit(1)
+    if not k_hard_ring.has_same_units(u):
+        logger.error("k-hard-ring must have units of kcal/mol/rad**2")
+        sys.exit(1)
     if not k_soft.has_same_units(u):
         logger.error("k-soft must have units of kcal/mol/rad**2")
+        sys.exit(1)
+
+    # Validate soften-anchors.
+    if not 0.0 <= args.soften_anchors <= 1.0:
+        logger.error("soften-anchors must be between 0.0 and 1.0")
+        sys.exit(1)
+
+    # Try to parse the k-rotamer value.
+    try:
+        k_rotamer = sr.u(args.k_rotamer)
+    except Exception as e:
+        logger.error(f"An error occurred while parsing the k-rotamer value: {e}")
+        sys.exit(1)
+
+    u_energy = sr.u("kcal/mol")
+    if not k_rotamer.has_same_units(u_energy):
+        logger.error("k-rotamer must have units of kcal/mol")
         sys.exit(1)
 
     # Try to merge the reference and perturbed molecules.
@@ -272,9 +352,13 @@ def run():
         system, modifications = modify(
             system,
             k_hard.value(),
-            k_soft.value(),
-            args.optimise_angles,
-            args.num_optimise,
+            k_hard_ring=k_hard_ring.value(),
+            k_soft=k_soft.value(),
+            optimise_angles=args.optimise_angles,
+            num_optimise=args.num_optimise,
+            soften_anchors=args.soften_anchors,
+            stiffen_rotamers=args.stiffen_rotamers,
+            k_rotamer=k_rotamer.value(),
         )
     except Exception as e:
         logger.error(
