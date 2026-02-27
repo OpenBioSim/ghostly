@@ -275,8 +275,7 @@ def test_acetone_to_propenol():
 
 def test_ejm49_to_ejm31():
     """
-    Test ghost atom modifications for the TYK ligands EJM 49 to 31. This is assert
-    more complex perturbation.
+    Test ghost atom modifications for the TYK ligands EJM 49 to 31.
     """
 
     # Load the system. Here pruned means that the atom mapping has pruned
