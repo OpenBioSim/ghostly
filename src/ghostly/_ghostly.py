@@ -223,10 +223,7 @@ def modify(
             all_phys = []
             non_shared_bridge_phys = []
             for c in connectivity0.connections_to(b):
-                if (
-                    not _is_ghost(mol, [c])[0]
-                    and not _is_ghost(mol, [c], is_lambda1=True)[0]
-                ):
+                if not _is_ghost(mol, [c])[0]:
                     all_phys.append(c)
                     if c.value() not in shared_ghost_bridges:
                         non_shared_bridge_phys.append(c)
@@ -256,10 +253,7 @@ def modify(
             all_phys = []
             non_shared_bridge_phys = []
             for c in connectivity1.connections_to(b):
-                if (
-                    not _is_ghost(mol, [c])[0]
-                    and not _is_ghost(mol, [c], is_lambda1=True)[0]
-                ):
+                if not _is_ghost(mol, [c], is_lambda1=True)[0]:
                     all_phys.append(c)
                     if c.value() not in shared_ghost_bridges:
                         non_shared_bridge_phys.append(c)
