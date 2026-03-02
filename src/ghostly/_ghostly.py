@@ -2227,14 +2227,15 @@ def _check_rotamer_anchors(
 
     lam = int(is_lambda1)
 
-    # Link the molecule to the desired end state and convert to RDKit.
-    if is_lambda1:
-        end_state_mol = _morph.link_to_perturbed(mol)
-    else:
-        end_state_mol = _morph.link_to_reference(mol)
-
+    # Check hybridisation and ring membership at the state where the ghost is
+    # physically present. For bridges0, the ghost is physically present at
+    # lambda=1 (it is ghost/virtual at lambda=0). For bridges1, the ghost is
+    # physically present at lambda=0.
     try:
-        rdmol = to_rdkit(end_state_mol)
+        if is_lambda1:
+            rdmol = to_rdkit(_morph.link_to_reference(mol))
+        else:
+            rdmol = to_rdkit(_morph.link_to_perturbed(mol))
     except Exception as e:
         _logger.warning(f"Failed to convert molecule to RDKit for rotamer check: {e}")
         return mol
