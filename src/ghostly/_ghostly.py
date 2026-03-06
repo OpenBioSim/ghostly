@@ -1406,23 +1406,34 @@ def _triple(
 
                 # This is the softened angle term.
                 if idx in angle_idxs:
-                    # Get the optimised equilibrium angle.
-                    theta0 = theta0_means[idx]
-                    std = theta0_stds[idx]
+                    if is_error:
+                        # Minimisation failed: preserve the original theta0
+                        # and just soften the force constant.
+                        theta0 = _SireMM.AmberAngle(
+                            p.function(), Symbol("theta")
+                        ).theta0()
+                    else:
+                        theta0 = theta0_means[idx]
 
                     # Create the new angle function.
-                    amber_angle = _SireMM.AmberAngle(k_soft, theta0)
+                    expression = _SireMM.AmberAngle(k_soft, theta0).to_expression(
+                        Symbol("theta")
+                    )
 
-                    # Generate the new angle expression.
-                    expression = amber_angle.to_expression(Symbol("theta"))
-
-                    # Set the equilibrium angle to 90 degrees.
                     new_angles.set(idx0, idx1, idx2, expression)
 
-                    _logger.debug(
-                        f"  Optimised angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
-                        f"{p.function()} --> {expression} (std err: {std:.3f} radian)"
-                    )
+                    if is_error:
+                        _logger.warning(
+                            f"  Angle optimisation failed for "
+                            f"[{idx0.value()}-{idx1.value()}-{idx2.value()}]: "
+                            f"using original theta0 with k_soft."
+                        )
+                    else:
+                        _logger.debug(
+                            f"  Optimised angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                            f"{p.function()} --> {expression} "
+                            f"(std err: {theta0_stds[idx]:.3f} radian)"
+                        )
 
                     ang_idx = ",".join([str(i.value()) for i in idx])
                     modifications[mod_key]["softened_angles"][ang_idx] = {
