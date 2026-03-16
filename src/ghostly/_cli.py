@@ -115,9 +115,12 @@ def run():
         action=argparse.BooleanOptionalAction,
         help="""
              Whether to optimise the equilibrium value of the angle terms involving
-             ghost atoms for non-planar triple junctions.
+             ghost atoms for non-planar triple junctions. Disabled by default due
+             to conformer dependence: different input geometries can yield different
+             equilibrium angles, adding variability to the resulting force field.
+             Enable for simple, symmetric cases to follow Boresch et al. strictly.
              """,
-        default=True,
+        default=False,
         required=False,
     )
 

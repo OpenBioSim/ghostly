@@ -48,7 +48,7 @@ def modify(
     system,
     k_hard=100,
     k_soft=5,
-    optimise_angles=True,
+    optimise_angles=False,
     num_optimise=10,
     soften_anchors=1.0,
     stiffen_rotamers=False,
@@ -83,7 +83,15 @@ def modify(
 
     optimise_angles : bool, optional
         Whether to optimise the equilibrium value of the angle terms involving
-        ghost atoms for non-planar triple junctions.
+        ghost atoms for non-planar triple junctions. Boresch et al. (JCTC 2021)
+        recommend finding theta0 by minimisation with very low force constants,
+        but this was validated on ammonia — a small symmetric molecule with a
+        unique minimum. For complex drug-like molecules, minimisation is
+        conformer-dependent: different input geometries give different theta0
+        values, adding variability to the resulting force field. The original
+        force field theta0 reflects the physical end-state equilibrium geometry
+        and is sufficient given the small k_soft value. Defaults to False;
+        set True to follow Boresch strictly for simple, symmetric cases.
 
     num_optimise : int, optional
         The number of repeats to average over when optimising the equilibrium
@@ -1127,7 +1135,7 @@ def _triple(
     modifications,
     k_hard=100,
     k_soft=5,
-    optimise_angles=True,
+    optimise_angles=False,
     num_optimise=10,
     is_lambda1=False,
     bridge_indices=None,
@@ -1612,7 +1620,7 @@ def _higher(
     modifications,
     k_hard=100,
     k_soft=5,
-    optimise_angles=True,
+    optimise_angles=False,
     num_optimise=10,
     is_lambda1=False,
 ):
