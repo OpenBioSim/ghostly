@@ -72,7 +72,14 @@ def modify(
 
     k_soft : float, optional
         The force constant to use when setting angle terms involving ghost atoms
-        for non-planar triple junctions. (In kcal/mol/rad^2)
+        for non-planar triple junctions. Should be small relative to the
+        physical angle force constants of the force field in use, so as not to
+        distort the physical end-state geometry, while still providing enough
+        anchoring to prevent flapping. Boresch et al. (JCTC 2021) used 3.55
+        kcal/mol/rad^2, derived from CGenFF ammonia H-N-H parameters. For
+        GAFF (~41 kcal/mol/rad^2) and OpenFF (~54 kcal/mol/rad^2), the default
+        of 5 kcal/mol/rad^2 is similarly small relative to the physical force
+        constants and is well justified. (In kcal/mol/rad^2)
 
     optimise_angles : bool, optional
         Whether to optimise the equilibrium value of the angle terms involving
@@ -1167,7 +1174,10 @@ def _triple(
 
     k_soft : float, optional
         The force constant to use when setting angle terms involving ghost
-        atoms for non-planar triple junctions. (In kcal/mol/rad^2)
+        atoms for non-planar triple junctions. Should be small relative to
+        the physical angle force constants of the force field in use. For
+        GAFF (~41 kcal/mol/rad^2) and OpenFF (~54 kcal/mol/rad^2), the
+        default of 5 kcal/mol/rad^2 is appropriate. (In kcal/mol/rad^2)
 
     optimise_angles : bool, optional
         Whether to optimise the equilibrium value of the angle terms involving
@@ -1636,7 +1646,10 @@ def _higher(
 
     k_soft : float, optional
         The force constant to use when setting angle terms involving ghost
-        atoms for non-planar triple junctions. (In kcal/mol/rad^2)
+        atoms for non-planar triple junctions. Should be small relative to
+        the physical angle force constants of the force field in use. For
+        GAFF (~41 kcal/mol/rad^2) and OpenFF (~54 kcal/mol/rad^2), the
+        default of 5 kcal/mol/rad^2 is appropriate. (In kcal/mol/rad^2)
 
     optimise_angles : bool, optional
         Whether to optimise the equilibrium value of the angle terms involving
