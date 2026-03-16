@@ -125,13 +125,26 @@ def test_toluene_to_pyridine():
         (AtomIdx(0), AtomIdx(1), AtomIdx(6)),
     ]
 
-    for p_orig, p_new in zip(angles.potentials(), new_angles.potentials()):
-        idx0 = info.atom_idx(p_orig.atom0())
-        idx1 = info.atom_idx(p_orig.atom1())
-        idx2 = info.atom_idx(p_orig.atom2())
+    orig_angle_map = {
+        (
+            info.atom_idx(p.atom0()),
+            info.atom_idx(p.atom1()),
+            info.atom_idx(p.atom2()),
+        ): str(p.function())
+        for p in angles.potentials()
+    }
+    new_angle_map = {
+        (
+            info.atom_idx(p.atom0()),
+            info.atom_idx(p.atom1()),
+            info.atom_idx(p.atom2()),
+        ): str(p.function())
+        for p in new_angles.potentials()
+    }
 
-        if (idx0, idx1, idx2) in ring_bridge_angles:
-            assert str(p_orig.function()) == str(p_new.function())
+    for angle_idx in ring_bridge_angles:
+        if angle_idx in orig_angle_map and angle_idx in new_angle_map:
+            assert orig_angle_map[angle_idx] == new_angle_map[angle_idx]
 
 
 def test_acetone_to_propenol():
@@ -367,21 +380,46 @@ def test_ejm49_to_ejm31():
         (AtomIdx(18), AtomIdx(17), AtomIdx(20)),
     ]
 
-    for p_orig, p_new in zip(angles0.potentials(), new_angles0.potentials()):
-        idx0 = info.atom_idx(p_orig.atom0())
-        idx1 = info.atom_idx(p_orig.atom1())
-        idx2 = info.atom_idx(p_orig.atom2())
+    orig_angle_map0 = {
+        (
+            info.atom_idx(p.atom0()),
+            info.atom_idx(p.atom1()),
+            info.atom_idx(p.atom2()),
+        ): str(p.function())
+        for p in angles0.potentials()
+    }
+    new_angle_map0 = {
+        (
+            info.atom_idx(p.atom0()),
+            info.atom_idx(p.atom1()),
+            info.atom_idx(p.atom2()),
+        ): str(p.function())
+        for p in new_angles0.potentials()
+    }
+    orig_angle_map1 = {
+        (
+            info.atom_idx(p.atom0()),
+            info.atom_idx(p.atom1()),
+            info.atom_idx(p.atom2()),
+        ): str(p.function())
+        for p in angles1.potentials()
+    }
+    new_angle_map1 = {
+        (
+            info.atom_idx(p.atom0()),
+            info.atom_idx(p.atom1()),
+            info.atom_idx(p.atom2()),
+        ): str(p.function())
+        for p in new_angles1.potentials()
+    }
 
-        if (idx0, idx1, idx2) in sp2_bridge_angles0:
-            assert str(p_orig.function()) == str(p_new.function())
+    for angle_idx in sp2_bridge_angles0:
+        if angle_idx in orig_angle_map0 and angle_idx in new_angle_map0:
+            assert orig_angle_map0[angle_idx] == new_angle_map0[angle_idx]
 
-    for p_orig, p_new in zip(angles1.potentials(), new_angles1.potentials()):
-        idx0 = info.atom_idx(p_orig.atom0())
-        idx1 = info.atom_idx(p_orig.atom1())
-        idx2 = info.atom_idx(p_orig.atom2())
-
-        if (idx0, idx1, idx2) in sp2_bridge_angles1:
-            assert str(p_orig.function()) == str(p_new.function())
+    for angle_idx in sp2_bridge_angles1:
+        if angle_idx in orig_angle_map1 and angle_idx in new_angle_map1:
+            assert orig_angle_map1[angle_idx] == new_angle_map1[angle_idx]
 
     # Create improper IDs for the missing impropers at lambda = 0.
     missing_impropers0 = [
