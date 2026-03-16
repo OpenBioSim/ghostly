@@ -74,11 +74,8 @@ def test_toluene_to_pyridine():
     angles = mols[0].property("angle1")
     dihedrals = mols[0].property("dihedral1")
 
-    # Force constant for stiffening angles where the bridge atom is in a ring.
-    k_kard_ring = 75
-
     # Apply the ghost atom modifications.
-    new_mols, _ = modify(mols, k_hard_ring=k_kard_ring)
+    new_mols, _ = modify(mols)
 
     # Get the new angles and dihedrals.
     new_angles = new_mols[0].property("angle1")
@@ -119,33 +116,22 @@ def test_toluene_to_pyridine():
         for dihedral in missing_dihedrals
     )
 
-    # Create a list of angle IDs for the modified angles.
-    modified_angles = [
+    # Bridge atom 1 is in an aromatic ring. Boresch notes that for rigid ring
+    # systems the coupling is acceptable, and the ring geometry already
+    # constrains the ghost position, so no stiffening is applied. The angles
+    # involving the ring-bridge ghost should be unchanged.
+    ring_bridge_angles = [
         (AtomIdx(0), AtomIdx(1), AtomIdx(2)),
         (AtomIdx(0), AtomIdx(1), AtomIdx(6)),
     ]
 
-    # Functional form of the modified angles.
-    # Bridge atom 1 is in a ring, so k_hard_ring (75) is used.
-    expression = f"{k_kard_ring} [theta - 1.5708]^2"
+    for p_orig, p_new in zip(angles.potentials(), new_angles.potentials()):
+        idx0 = info.atom_idx(p_orig.atom0())
+        idx1 = info.atom_idx(p_orig.atom1())
+        idx2 = info.atom_idx(p_orig.atom2())
 
-    # Check that the original angles don't have the modified functional form.
-    for p in angles.potentials():
-        idx0 = info.atom_idx(p.atom0())
-        idx1 = info.atom_idx(p.atom1())
-        idx2 = info.atom_idx(p.atom2())
-
-        if (idx0, idx1, idx2) in modified_angles:
-            assert str(p.function()) != expression
-
-    # Check that the modified angles have the correct functional form.
-    for p in new_angles.potentials():
-        idx0 = info.atom_idx(p.atom0())
-        idx1 = info.atom_idx(p.atom1())
-        idx2 = info.atom_idx(p.atom2())
-
-        if (idx0, idx1, idx2) in modified_angles:
-            assert str(p.function()) == expression
+        if (idx0, idx1, idx2) in ring_bridge_angles:
+            assert str(p_orig.function()) == str(p_new.function())
 
 
 def test_acetone_to_propenol():

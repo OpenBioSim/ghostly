@@ -47,7 +47,6 @@ del _platform
 def modify(
     system,
     k_hard=100,
-    k_hard_ring=75,
     k_soft=5,
     optimise_angles=True,
     num_optimise=10,
@@ -68,13 +67,6 @@ def modify(
     k_hard : float, optional
         The force constant to use to when setting angle terms involving ghost
         atoms to 90 degrees to avoid flapping. (In kcal/mol/rad^2)
-
-    k_hard_ring : float, optional
-        The force constant to use when setting angle terms involving ghost
-        atoms to 90 degrees for bridge atoms that are in a ring. Ring bridges
-        suffer strain from the 90 degree target fighting the natural ring
-        geometry (~110 degrees). A lower force constant reduces this strain
-        while still preventing flapping. (In kcal/mol/rad^2)
 
     k_soft : float, optional
         The force constant to use when setting angle terms involving ghost atoms
@@ -322,7 +314,6 @@ def modify(
                     connectivity0,
                     modifications,
                     k_hard=k_hard,
-                    k_hard_ring=k_hard_ring,
                     bridge_indices=bridge_indices0,
                 )
 
@@ -336,7 +327,6 @@ def modify(
                     connectivity0,
                     modifications,
                     k_hard=k_hard,
-                    k_hard_ring=k_hard_ring,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
                     num_optimise=num_optimise,
@@ -417,7 +407,6 @@ def modify(
                     connectivity1,
                     modifications,
                     k_hard=k_hard,
-                    k_hard_ring=k_hard_ring,
                     is_lambda1=True,
                     bridge_indices=bridge_indices1,
                 )
@@ -431,7 +420,6 @@ def modify(
                     connectivity1,
                     modifications,
                     k_hard=k_hard,
-                    k_hard_ring=k_hard_ring,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
                     num_optimise=num_optimise,
@@ -741,7 +729,6 @@ def _dual(
     connectivity,
     modifications,
     k_hard=100,
-    k_hard_ring=75,
     is_lambda1=False,
     bridge_indices=None,
 ):
@@ -783,10 +770,6 @@ def _dual(
     k_hard : float, optional
         The force constant to use when setting angle terms involving ghost
         atoms to 90 degrees to avoid flapping. (In kcal/mol/rad^2)
-
-    k_hard_ring : float, optional
-        The force constant to use when the bridge atom is in a ring, where
-        the 90 degree target fights the natural ring geometry. (In kcal/mol/rad^2)
 
     is_lambda1 : bool, optional
         Whether the junction is at lambda = 1.
@@ -859,9 +842,6 @@ def _dual(
         best_phys_score = 0
         heavy_phys = set(physical)
 
-    # Choose the force constant for angle stiffening.
-    k = k_hard_ring if bridge_in_ring else k_hard
-
     # Single branch.
     if len(ghosts) == 1:
         _logger.debug("  Single branch:")
@@ -926,6 +906,19 @@ def _dual(
                 # Identify the physical atom in this angle.
                 phys_atom = idx2 if idx0 in ghosts else idx0
 
+                # Ring bridges: the ring geometry already constrains the ghost
+                # position and prevents flapping (Boresch et al. note this is
+                # "acceptable if the physical molecule is a rigid ring system").
+                # Stiffening to 90° would introduce strain without benefit.
+                if bridge_in_ring:
+                    new_angles.set(idx0, idx1, idx2, p.function())
+                    _logger.debug(
+                        f"  Skipping stiffening for angle "
+                        f"[{idx0.value()}-{idx1.value()}-{idx2.value()}]: "
+                        f"bridge atom {bridge.value()} is in a ring."
+                    )
+                    continue
+
                 # Skip stiffening through poorly-scoring atoms if better ones
                 # exist AND at least one heavy atom would remain as anchor.
                 # Without a heavy anchor, the ghost is under-constrained.
@@ -950,7 +943,7 @@ def _dual(
                 theta0 = pi / 2.0
 
                 # Create the new angle function.
-                amber_angle = _SireMM.AmberAngle(k, theta0)
+                amber_angle = _SireMM.AmberAngle(k_hard, theta0)
 
                 # Generate the new angle expression.
                 expression = amber_angle.to_expression(Symbol("theta"))
@@ -966,7 +959,7 @@ def _dual(
                 ang_idx = ",".join(
                     [str(i) for i in (idx0.value(), idx1.value(), idx2.value())]
                 )
-                modifications[mod_key]["stiffened_angles"][ang_idx] = {"k": k}
+                modifications[mod_key]["stiffened_angles"][ang_idx] = {"k": k_hard}
 
             else:
                 new_angles.set(idx0, idx1, idx2, p.function())
@@ -1051,7 +1044,6 @@ def _dual(
                 connectivity,
                 modifications,
                 k_hard=k_hard,
-                k_hard_ring=k_hard_ring,
                 is_lambda1=is_lambda1,
                 bridge_indices=bridge_indices,
             )
@@ -1068,7 +1060,6 @@ def _triple(
     connectivity,
     modifications,
     k_hard=100,
-    k_hard_ring=75,
     k_soft=5,
     optimise_angles=True,
     num_optimise=10,
@@ -1112,10 +1103,6 @@ def _triple(
     k_hard : float, optional
         The force constant to use when setting angle terms involving ghost
         atoms to 90 degrees to avoid flapping. (In kcal/mol/rad^2)
-
-    k_hard_ring : float, optional
-        The force constant to use when the bridge atom is in a ring, where
-        the 90 degree target fights the natural ring geometry. (In kcal/mol/rad^2)
 
     k_soft : float, optional
         The force constant to use when setting angle terms involving ghost
@@ -1535,7 +1522,6 @@ def _triple(
             connectivity,
             modifications,
             k_hard=k_hard,
-            k_hard_ring=k_hard_ring,
             is_lambda1=is_lambda1,
             bridge_indices=bridge_indices,
         )

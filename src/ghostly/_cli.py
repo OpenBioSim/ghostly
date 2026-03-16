@@ -100,19 +100,6 @@ def run():
     )
 
     parser.add_argument(
-        "--k-hard-ring",
-        type=str,
-        help="""
-             The force constant to use when setting angle terms involving ghost
-             atoms to 90 degrees for bridge atoms that are in a ring. A lower
-             value reduces strain where the 90 degree target fights the natural
-             ring geometry.
-             """,
-        default="75 kcal/mol/rad**2",
-        required=False,
-    )
-
-    parser.add_argument(
         "--k-soft",
         type=str,
         help="""
@@ -293,12 +280,6 @@ def run():
         sys.exit(1)
 
     try:
-        k_hard_ring = sr.u(args.k_hard_ring)
-    except Exception as e:
-        logger.error(f"An error occurred while parsing the k-hard-ring value: {e}")
-        sys.exit(1)
-
-    try:
         k_soft = sr.u(args.k_soft)
     except Exception as e:
         logger.error(f"An error occurred while parsing the k-soft value: {e}")
@@ -307,9 +288,6 @@ def run():
     u = sr.u("kcal/mol/rad**2")
     if not k_hard.has_same_units(u):
         logger.error("k-hard must have units of kcal/mol/rad**2")
-        sys.exit(1)
-    if not k_hard_ring.has_same_units(u):
-        logger.error("k-hard-ring must have units of kcal/mol/rad**2")
         sys.exit(1)
     if not k_soft.has_same_units(u):
         logger.error("k-soft must have units of kcal/mol/rad**2")
@@ -352,7 +330,6 @@ def run():
         system, modifications = modify(
             system,
             k_hard.value(),
-            k_hard_ring=k_hard_ring.value(),
             k_soft=k_soft.value(),
             optimise_angles=args.optimise_angles,
             num_optimise=args.num_optimise,
