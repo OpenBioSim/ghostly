@@ -153,8 +153,10 @@ def test_acetone_to_propenol():
     # Force constant for stiffening angles.
     k_hard = 100
 
-    # Apply the ghost atom modifications.
-    new_mols, _ = modify(mols, k_hard=k_hard)
+    # Apply the ghost atom modifications. Bridge atom 3 is sp2 (carbonyl
+    # carbon): explicitly enable sp2 stiffening to test the canonical Boresch
+    # planar triple junction behaviour.
+    new_mols, _ = modify(mols, k_hard=k_hard, stiffen_sp2_bridges=True)
 
     # Get the new angles and dihedrals.
     new_angles0 = new_mols[0].property("angle0")
@@ -353,56 +355,33 @@ def test_ejm49_to_ejm31():
         for dihedral in missing_dihedrals1
     )
 
-    # Create angle IDs for the modified angles at lambda = 0.
-    modified_angles0 = [
+    # Bridge atom 17 is sp2 and not in a ring. With stiffen_sp2_bridges=False
+    # (the default), stiffening is skipped to avoid ~30° strain. Check that
+    # these angles are unchanged at both end states.
+    sp2_bridge_angles0 = [
         (AtomIdx(16), AtomIdx(17), AtomIdx(39)),
         (AtomIdx(18), AtomIdx(17), AtomIdx(39)),
     ]
-
-    # Functional form of the modified angles.
-    expression = "100 [theta - 1.5708]^2"
-
-    # Check that the original angles don't have the modified functional form.
-    for p in angles0.potentials():
-        idx0 = info.atom_idx(p.atom0())
-        idx1 = info.atom_idx(p.atom1())
-        idx2 = info.atom_idx(p.atom2())
-
-        if (idx0, idx1, idx2) in modified_angles0:
-            assert str(p.function()) != expression
-
-    # Check that the modified angles have the correct functional form.
-    for p in new_angles0.potentials():
-        idx0 = info.atom_idx(p.atom0())
-        idx1 = info.atom_idx(p.atom1())
-        idx2 = info.atom_idx(p.atom2())
-
-        if (idx0, idx1, idx2) in modified_angles0:
-            assert str(p.function()) == expression
-
-    # Create angle IDs for the modified angles at lambda = 1.
-    modified_angles1 = [
+    sp2_bridge_angles1 = [
         (AtomIdx(16), AtomIdx(17), AtomIdx(20)),
         (AtomIdx(18), AtomIdx(17), AtomIdx(20)),
     ]
 
-    # Check that the original angles don't have the modified functional form.
-    for p in angles1.potentials():
-        idx0 = info.atom_idx(p.atom0())
-        idx1 = info.atom_idx(p.atom1())
-        idx2 = info.atom_idx(p.atom2())
+    for p_orig, p_new in zip(angles0.potentials(), new_angles0.potentials()):
+        idx0 = info.atom_idx(p_orig.atom0())
+        idx1 = info.atom_idx(p_orig.atom1())
+        idx2 = info.atom_idx(p_orig.atom2())
 
-        if (idx0, idx1, idx2) in modified_angles1:
-            assert str(p.function()) != expression
+        if (idx0, idx1, idx2) in sp2_bridge_angles0:
+            assert str(p_orig.function()) == str(p_new.function())
 
-    # Check that the modified angles have the correct functional form.
-    for p in new_angles1.potentials():
-        idx0 = info.atom_idx(p.atom0())
-        idx1 = info.atom_idx(p.atom1())
-        idx2 = info.atom_idx(p.atom2())
+    for p_orig, p_new in zip(angles1.potentials(), new_angles1.potentials()):
+        idx0 = info.atom_idx(p_orig.atom0())
+        idx1 = info.atom_idx(p_orig.atom1())
+        idx2 = info.atom_idx(p_orig.atom2())
 
-        if (idx0, idx1, idx2) in modified_angles1:
-            assert str(p.function()) == expression
+        if (idx0, idx1, idx2) in sp2_bridge_angles1:
+            assert str(p_orig.function()) == str(p_new.function())
 
     # Create improper IDs for the missing impropers at lambda = 0.
     missing_impropers0 = [

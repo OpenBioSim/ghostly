@@ -175,6 +175,34 @@ def run():
     )
 
     parser.add_argument(
+        "--stiffen-ring-bridges",
+        action="store_true",
+        help="""
+             Apply 90 degree angle stiffening when the bridge atom is in a
+             ring. By default this is skipped since the ring geometry already
+             constrains the ghost position and stiffening introduces strain.
+             A warning is logged when this is enabled and a ring bridge is
+             detected.
+             """,
+        default=False,
+        required=False,
+    )
+
+    parser.add_argument(
+        "--stiffen-sp2-bridges",
+        action="store_true",
+        help="""
+             Apply 90 degree angle stiffening when the bridge atom is sp2 and
+             not in a ring. By default this is skipped since sp2 hybridisation
+             already constrains the ghost to the molecular plane and stiffening
+             introduces ~30 degrees of strain. A warning is logged when this
+             is enabled and an sp2 bridge is detected.
+             """,
+        default=False,
+        required=False,
+    )
+
+    parser.add_argument(
         "--output-prefix",
         type=str,
         help="File prefix for the output file.",
@@ -336,6 +364,8 @@ def run():
             soften_anchors=args.soften_anchors,
             stiffen_rotamers=args.stiffen_rotamers,
             k_rotamer=k_rotamer.value(),
+            stiffen_ring_bridges=args.stiffen_ring_bridges,
+            stiffen_sp2_bridges=args.stiffen_sp2_bridges,
         )
     except Exception as e:
         logger.error(

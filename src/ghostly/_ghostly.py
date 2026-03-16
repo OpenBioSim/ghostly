@@ -53,6 +53,8 @@ def modify(
     soften_anchors=1.0,
     stiffen_rotamers=False,
     k_rotamer=50,
+    stiffen_ring_bridges=False,
+    stiffen_sp2_bridges=False,
 ):
     """
     Apply modifications to ghost atom bonded terms to avoid non-physical
@@ -106,6 +108,21 @@ def modify(
         The force constant for the replacement cosine well when stiffening
         rotamer anchor dihedrals (in kcal/mol). The resulting barrier height
         is ``2 * k_rotamer``. Only used when ``stiffen_rotamers`` is True.
+
+    stiffen_ring_bridges : bool, optional
+        Whether to apply 90° angle stiffening when the bridge atom is in a
+        ring. Boresch notes that for rigid ring systems the partition function
+        coupling is small and acceptable, so stiffening is skipped by default
+        (False). Enabling this restores the original behaviour but introduces
+        strain where the 90° target fights the natural ring geometry.
+
+    stiffen_sp2_bridges : bool, optional
+        Whether to apply 90° angle stiffening when the bridge atom is sp2 and
+        not in a ring (e.g. carbonyl or alkene carbons). The natural angle is
+        ~120°, so stiffening to 90° introduces ~30° strain and may cause
+        instabilities or free energy bias. Stiffening is skipped by default
+        (False). Enabling this restores the original behaviour but a warning
+        will be logged to flag the potential strain issue.
 
     Returns
     -------
@@ -315,6 +332,8 @@ def modify(
                     modifications,
                     k_hard=k_hard,
                     bridge_indices=bridge_indices0,
+                    stiffen_ring_bridges=stiffen_ring_bridges,
+                    stiffen_sp2_bridges=stiffen_sp2_bridges,
                 )
 
             # Triple junction.
@@ -331,6 +350,8 @@ def modify(
                     optimise_angles=optimise_angles,
                     num_optimise=num_optimise,
                     bridge_indices=bridge_indices0,
+                    stiffen_ring_bridges=stiffen_ring_bridges,
+                    stiffen_sp2_bridges=stiffen_sp2_bridges,
                 )
 
             # Higher order junction.
@@ -409,6 +430,8 @@ def modify(
                     k_hard=k_hard,
                     is_lambda1=True,
                     bridge_indices=bridge_indices1,
+                    stiffen_ring_bridges=stiffen_ring_bridges,
+                    stiffen_sp2_bridges=stiffen_sp2_bridges,
                 )
 
             elif junction == 3:
@@ -425,6 +448,8 @@ def modify(
                     num_optimise=num_optimise,
                     is_lambda1=True,
                     bridge_indices=bridge_indices1,
+                    stiffen_ring_bridges=stiffen_ring_bridges,
+                    stiffen_sp2_bridges=stiffen_sp2_bridges,
                 )
 
             # Higher order junction.
@@ -731,6 +756,8 @@ def _dual(
     k_hard=100,
     is_lambda1=False,
     bridge_indices=None,
+    stiffen_ring_bridges=False,
+    stiffen_sp2_bridges=False,
 ):
     r"""
     Apply modifications to a dual junction.
@@ -822,6 +849,24 @@ def _dual(
         rdmol is not None and rdmol.GetAtomWithIdx(bridge.value()).IsInRing()
     )
 
+    # Check sp2 hybridisation for non-ring bridges.
+    bridge_is_sp2 = False
+    if rdmol is not None and not bridge_in_ring:
+        from rdkit.Chem.rdchem import HybridizationType
+
+        hyb = rdmol.GetAtomWithIdx(bridge.value()).GetHybridization()
+        bridge_is_sp2 = hyb == HybridizationType.SP2
+
+    # Warn if sp2 stiffening is enabled: the ~30° strain from 90° vs natural
+    # ~120° may cause instabilities or free energy bias.
+    if bridge_is_sp2 and stiffen_sp2_bridges:
+        _logger.warning(
+            f"Bridge atom {bridge.value()} is sp2 and not in a ring. "
+            f"Stiffening ghost angles to 90° introduces ~30° strain "
+            f"from the natural ~120° sp2 geometry. This may cause "
+            f"instabilities or free energy bias."
+        )
+
     # Score the physical neighbours.
     if bridge_indices is not None:
         phys_scores = {p: _score_atom(mol, p, bridge_indices) for p in physical}
@@ -910,12 +955,24 @@ def _dual(
                 # position and prevents flapping (Boresch et al. note this is
                 # "acceptable if the physical molecule is a rigid ring system").
                 # Stiffening to 90° would introduce strain without benefit.
-                if bridge_in_ring:
+                if bridge_in_ring and not stiffen_ring_bridges:
                     new_angles.set(idx0, idx1, idx2, p.function())
                     _logger.debug(
                         f"  Skipping stiffening for angle "
                         f"[{idx0.value()}-{idx1.value()}-{idx2.value()}]: "
                         f"bridge atom {bridge.value()} is in a ring."
+                    )
+                    continue
+
+                # sp2 non-ring bridges: sp2 hybridisation constrains the ghost
+                # to the molecular plane, preventing flapping. Stiffening to
+                # 90° from the natural ~120° introduces ~30° strain.
+                if bridge_is_sp2 and not stiffen_sp2_bridges:
+                    new_angles.set(idx0, idx1, idx2, p.function())
+                    _logger.debug(
+                        f"  Skipping stiffening for angle "
+                        f"[{idx0.value()}-{idx1.value()}-{idx2.value()}]: "
+                        f"bridge atom {bridge.value()} is sp2."
                     )
                     continue
 
@@ -1046,6 +1103,8 @@ def _dual(
                 k_hard=k_hard,
                 is_lambda1=is_lambda1,
                 bridge_indices=bridge_indices,
+                stiffen_ring_bridges=stiffen_ring_bridges,
+                stiffen_sp2_bridges=stiffen_sp2_bridges,
             )
 
     # Return the updated molecule.
@@ -1065,6 +1124,8 @@ def _triple(
     num_optimise=10,
     is_lambda1=False,
     bridge_indices=None,
+    stiffen_ring_bridges=False,
+    stiffen_sp2_bridges=False,
 ):
     r"""
     Apply modifications to a triple junction.
@@ -1524,6 +1585,8 @@ def _triple(
             k_hard=k_hard,
             is_lambda1=is_lambda1,
             bridge_indices=bridge_indices,
+            stiffen_ring_bridges=stiffen_ring_bridges,
+            stiffen_sp2_bridges=stiffen_sp2_bridges,
         )
 
     # Return the updated molecule.
