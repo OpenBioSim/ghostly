@@ -1066,6 +1066,21 @@ def _dual(
             idx2 = info.atom_idx(p.atom2())
 
             if idx0 in ghosts and idx2 in ghosts:
+                # When stiffening is skipped for ring/sp2 bridges, the individual
+                # ghost angles are left at their original values, so the intraghost
+                # angle (e.g. H-bridge-H) should also be preserved.
+                if (bridge_in_ring and not stiffen_ring_bridges) or (
+                    bridge_is_sp2 and not stiffen_sp2_bridges
+                ):
+                    new_angles.set(idx0, idx1, idx2, p.function())
+                    _logger.debug(
+                        f"  Preserving intraghost angle "
+                        f"[{idx0.value()}-{idx1.value()}-{idx2.value()}]: "
+                        f"bridge atom {bridge.value()} "
+                        f"{'is in a ring' if bridge_in_ring else 'is sp2'}, "
+                        f"not stiffening."
+                    )
+                    continue
                 _logger.debug(
                     f"  Removing angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
                 )
@@ -1246,6 +1261,9 @@ def _triple(
     bridge_rdatom = rdmol.GetAtomWithIdx(bridge.value())
     hybridisation = bridge_rdatom.GetHybridization()
     bridge_in_ring = bridge_rdatom.IsInRing()
+
+    # sp2 status for non-ring bridges (ring bridges use bridge_in_ring).
+    bridge_is_sp2 = not bridge_in_ring and hybridisation == HybridizationType.SP2
 
     # Warn if the hybridisation is unspecified.
     if hybridisation in (HybridizationType.UNSPECIFIED, HybridizationType.OTHER):
@@ -1553,6 +1571,21 @@ def _triple(
             idxs = [idx0, idx1, idx2]
 
             if idx in idxs and any([x in ghosts for x in idxs]):
+                # When stiffening is skipped for ring/sp2 bridges, preserve all
+                # ghost-containing angles at their original values rather than
+                # removing the sacrificial one.
+                if (bridge_in_ring and not stiffen_ring_bridges) or (
+                    bridge_is_sp2 and not stiffen_sp2_bridges
+                ):
+                    new_angles.set(idx0, idx1, idx2, p.function())
+                    _logger.debug(
+                        f"  Preserving angle "
+                        f"[{idx0.value()}-{idx1.value()}-{idx2.value()}]: "
+                        f"bridge atom {bridge.value()} "
+                        f"{'is in a ring' if bridge_in_ring else 'is sp2'}, "
+                        f"not stiffening."
+                    )
+                    continue
                 _logger.debug(
                     f"  Removing angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
                 )
