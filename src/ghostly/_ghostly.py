@@ -34,14 +34,15 @@ try:
 except Exception:
     from loguru import logger as _logger
 
-import platform as _platform
+import sys as _sys
 
-if _platform.system() == "Windows":
-    _lam_sym = "lambda"
-else:
+try:
+    "λ".encode(_sys.stdout.encoding or "utf-8")
     _lam_sym = "λ"
+except (UnicodeEncodeError, LookupError):
+    _lam_sym = "lambda"
 
-del _platform
+del _sys
 
 
 def modify(
