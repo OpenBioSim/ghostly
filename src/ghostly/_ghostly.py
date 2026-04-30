@@ -56,6 +56,7 @@ def modify(
     k_rotamer=50,
     stiffen_ring_bridges=False,
     stiffen_sp2_bridges=False,
+    linearise_ring_break=False,
 ):
     """
     Apply modifications to ghost atom bonded terms to avoid non-physical
@@ -140,6 +141,17 @@ def modify(
         (False). Enabling this restores the original behaviour but a warning
         will be logged to flag the potential strain issue.
 
+    linearise_ring_break : bool, optional
+        Whether to apply a linear spacer modification to ghost atoms that
+        bridge two physical atoms (the ring-breaking topology). Instead of
+        removing the P1-G-P2 angle (default behaviour), this sets it to 180°
+        with force constant ``k_soft`` and softens the G-P1 and G-P2 bonds
+        to ``k_soft``. The linear arrangement minimises the influence of the
+        ghost on the physical geometry while keeping it loosely tethered
+        between the two bridge atoms. All dihedrals involving G are removed
+        as they are degenerate at 180°. Disabled by default as it is
+        experimental; enable for ring-breaking or chain-expansion perturbations.
+
     Returns
     -------
 
@@ -186,6 +198,8 @@ def modify(
         "softened_angles": {},
         "softened_dihedrals": [],
         "stiffened_dihedrals": [],
+        "linearised_ring_break": [],
+        "softened_bonds": {},
     }
     modifications["lambda_1"] = {
         "removed_angles": [],
@@ -194,6 +208,8 @@ def modify(
         "softened_angles": {},
         "softened_dihedrals": [],
         "stiffened_dihedrals": [],
+        "linearised_ring_break": [],
+        "softened_bonds": {},
     }
 
     for mol in pert_mols:
@@ -394,9 +410,24 @@ def modify(
             mol, ghosts0, modifications, is_lambda1=False
         )
 
+        # Optionally apply the linear spacer modification to ghost atoms that
+        # bridge two physical atoms (ring-breaking topology).
+        linearised0 = set()
+        if linearise_ring_break:
+            mol, linearised0 = _linearise_ring_break(
+                mol,
+                ghosts0,
+                connectivity0,
+                modifications,
+                k_soft=k_soft,
+                is_lambda1=False,
+            )
+
         # Remove any angles where the central atom is ghost and both terminal
         # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
-        mol = _remove_ghost_centre_angles(mol, ghosts0, modifications, is_lambda1=False)
+        mol = _remove_ghost_centre_angles(
+            mol, ghosts0, modifications, skip_ghosts=linearised0, is_lambda1=False
+        )
 
         # Soften any surviving mixed ghost/physical dihedrals.
         mol = _soften_mixed_dihedrals(
@@ -493,9 +524,24 @@ def modify(
             mol, ghosts1, modifications, is_lambda1=True
         )
 
+        # Optionally apply the linear spacer modification to ghost atoms that
+        # bridge two physical atoms (ring-breaking topology).
+        linearised1 = set()
+        if linearise_ring_break:
+            mol, linearised1 = _linearise_ring_break(
+                mol,
+                ghosts1,
+                connectivity1,
+                modifications,
+                k_soft=k_soft,
+                is_lambda1=True,
+            )
+
         # Remove any angles where the central atom is ghost and both terminal
         # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
-        mol = _remove_ghost_centre_angles(mol, ghosts1, modifications, is_lambda1=True)
+        mol = _remove_ghost_centre_angles(
+            mol, ghosts1, modifications, skip_ghosts=linearised1, is_lambda1=True
+        )
 
         # Soften any surviving mixed ghost/physical dihedrals.
         mol = _soften_mixed_dihedrals(
@@ -2040,7 +2086,217 @@ def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=Fals
     return mol
 
 
-def _remove_ghost_centre_angles(mol, ghosts, modifications, is_lambda1=False):
+def _linearise_ring_break(
+    mol, ghosts, connectivity, modifications, k_soft=5, is_lambda1=False
+):
+    r"""
+    Apply a linear spacer modification to ghost atoms that bridge exactly two
+    physical atoms (the ring-breaking topology P1-G-P2). Instead of removing
+    the P1-G-P2 angle, this sets it to 180° with a soft force constant and
+    reduces the G-P1 and G-P2 bond force constants to k_soft. All dihedrals
+    involving G are removed as they are degenerate at 180°.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the current end state.
+
+    connectivity : sire.legacy.Mol.Connectivity
+        The connectivity object for the current end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    k_soft : float, optional
+        Force constant for the linearised angle and softened bonds
+        (kcal/mol/rad² for angles, kcal/mol/Å² for bonds).
+
+    is_lambda1 : bool, optional
+        Whether to modify terms at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+
+    linearised : set
+        Ghost atoms handled by this function (passed to
+        _remove_ghost_centre_angles as skip_ghosts).
+    """
+
+    if not ghosts:
+        return mol, set()
+
+    info = mol.info()
+    suffix = "1" if is_lambda1 else "0"
+    mod_key = "lambda_1" if is_lambda1 else "lambda_0"
+
+    from math import pi
+    from sire.legacy.CAS import Symbol
+
+    ghost_set = set(ghosts)
+    theta = Symbol("theta")
+    r = Symbol("r")
+
+    # Find ghost atoms with exactly 2 connections, both physical.
+    # If G has additional ghost substituents it may be a chiral centre at the
+    # physical end state; linearising at 180° would destroy that geometry, so
+    # we skip it and warn.
+    linearised = set()
+    for ghost in ghosts:
+        all_neighbors = list(connectivity.connections_to(ghost))
+        physical_neighbors = [n for n in all_neighbors if n not in ghost_set]
+        ghost_neighbors = [n for n in all_neighbors if n in ghost_set]
+
+        if len(physical_neighbors) == 2:
+            # Hydrogen ghost substituents cannot create chirality so are safe
+            # to ignore. Heavy ghost substituents may indicate a chiral centre
+            # at the physical end state, so we skip linearisation and warn.
+            elem_prop = "element0" if is_lambda1 else "element1"
+            heavy_ghost_neighbors = [
+                n
+                for n in ghost_neighbors
+                if mol.atom(n).property(elem_prop).symbol() not in ("H", "Xx", "")
+            ]
+            if not heavy_ghost_neighbors:
+                linearised.add(ghost)
+            else:
+                _logger.warning(
+                    f"  Ring-break ghost atom {ghost.value()} has "
+                    f"{len(heavy_ghost_neighbors)} heavy ghost substituent(s) "
+                    f"in addition to 2 physical neighbours. Linearisation "
+                    f"skipped to preserve potential chirality."
+                )
+
+    if not linearised:
+        return mol, linearised
+
+    _logger.debug(
+        f"Applying ring-break linear spacer modifications at "
+        f"{_lam_sym} = {'1' if is_lambda1 else '0'}:"
+    )
+
+    for ghost in linearised:
+        modifications[mod_key]["linearised_ring_break"].append(ghost.value())
+
+    # Modify P1-G-P2 angles: set to 180° with k_soft.
+    angles = mol.property("angle" + suffix)
+    new_angles = _SireMM.ThreeAtomFunctions(mol.info())
+    modified_angles = False
+
+    for p in angles.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+
+        if idx1 in linearised and idx0 not in ghost_set and idx2 not in ghost_set:
+            amber_angle = _SireMM.AmberAngle(k_soft, pi)
+            expression = amber_angle.to_expression(theta)
+            new_angles.set(idx0, idx1, idx2, expression)
+            _logger.debug(
+                f"  Linearising ring-break angle: "
+                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                f"{p.function()} --> {expression}"
+            )
+            modified_angles = True
+        else:
+            new_angles.set(idx0, idx1, idx2, p.function())
+
+    if modified_angles:
+        mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
+
+    # Soften G-P1 and G-P2 bonds, setting r0 to half the physical end-state
+    # value so Du sits midway between P1 and P2 at zero bond energy.
+    phys_suffix = "0" if is_lambda1 else "1"
+    phys_bonds = mol.property("bond" + phys_suffix)
+    phys_r0 = {}
+    for p in phys_bonds.potentials():
+        i0 = info.atom_idx(p.atom0())
+        i1 = info.atom_idx(p.atom1())
+        key = (min(i0.value(), i1.value()), max(i0.value(), i1.value()))
+        phys_r0[key] = _SireMM.AmberBond(p.function(), r).r0()
+
+    bonds = mol.property("bond" + suffix)
+    new_bonds = _SireMM.TwoAtomFunctions(mol.info())
+    modified_bonds = False
+
+    for p in bonds.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+
+        if idx0 in linearised or idx1 in linearised:
+            key = (min(idx0.value(), idx1.value()), max(idx0.value(), idx1.value()))
+            r0 = phys_r0.get(key)
+            if r0 is not None:
+                r0_new = r0 / 2.0
+            else:
+                r0_new = _SireMM.AmberBond(p.function(), r).r0()
+            expression = _SireMM.AmberBond(k_soft, r0_new).to_expression(r)
+            new_bonds.set(idx0, idx1, expression)
+            _logger.debug(
+                f"  Softening ring-break bond: "
+                f"[{idx0.value()}-{idx1.value()}], "
+                f"{p.function()} --> {expression}"
+            )
+            bond_idx = f"{idx0.value()},{idx1.value()}"
+            modifications[mod_key]["softened_bonds"][bond_idx] = {
+                "k": k_soft,
+                "r0": r0_new,
+            }
+            modified_bonds = True
+        else:
+            new_bonds.set(idx0, idx1, p.function())
+
+    if modified_bonds:
+        mol = mol.edit().set_property("bond" + suffix, new_bonds).molecule().commit()
+
+    # Remove all dihedrals involving linearised ghosts (degenerate at 180°).
+    dihedrals = mol.property("dihedral" + suffix)
+    new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+    modified_dihedrals = False
+
+    for p in dihedrals.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        if any(idx in linearised for idx in (idx0, idx1, idx2, idx3)):
+            _logger.debug(
+                f"  Removing ring-break dihedral: "
+                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
+                f"{p.function()}"
+            )
+            dih_idx = ",".join(
+                [
+                    str(i)
+                    for i in (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+                ]
+            )
+            modifications[mod_key]["removed_dihedrals"].append(dih_idx)
+            modified_dihedrals = True
+        else:
+            new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+    if modified_dihedrals:
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
+
+    return mol, linearised
+
+
+def _remove_ghost_centre_angles(
+    mol, ghosts, modifications, skip_ghosts=None, is_lambda1=False
+):
     r"""
     Remove angle terms where the central atom is ghost and both terminal
     atoms are physical. These can arise in ring-breaking topologies where
@@ -2109,8 +2365,13 @@ def _remove_ghost_centre_angles(mol, ghosts, modifications, is_lambda1=False):
         idx2 = info.atom_idx(p.atom2())
 
         # Remove any angle where the central atom is ghost and both
-        # terminal atoms are physical.
-        if idx1 in ghosts and idx0 not in ghosts and idx2 not in ghosts:
+        # terminal atoms are physical, unless already handled by linearisation.
+        if (
+            idx1 in ghosts
+            and idx0 not in ghosts
+            and idx2 not in ghosts
+            and (skip_ghosts is None or idx1 not in skip_ghosts)
+        ):
             _logger.debug(
                 f"  Removing ghost centre angle: "
                 f"[{idx0.value()}-{idx1.value()}-{idx2.value()}], "
