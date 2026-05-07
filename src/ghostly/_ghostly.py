@@ -2179,35 +2179,39 @@ def _linearise_ring_break(
     theta = Symbol("theta")
     r = Symbol("r")
 
-    # Find ghost atoms with exactly 2 connections, both physical.
-    # If G has additional ghost substituents it may be a chiral centre at the
-    # physical end state; linearising at 180° would destroy that geometry, so
-    # we skip it and warn.
+    # Build an RDKit molecule for the physical end state so we can query
+    # chirality directly rather than inferring it from substituent counts.
+    from sire.convert import to_rdkit as _to_rdkit
+    from rdkit.Chem import ChiralType as _ChiralType
+
+    phys_mol = (
+        _morph.link_to_reference(mol) if is_lambda1 else _morph.link_to_perturbed(mol)
+    )
+    rdmol = _to_rdkit(phys_mol)
+
     linearised = set()
     for ghost in ghosts:
         all_neighbors = list(connectivity.connections_to(ghost))
         physical_neighbors = [n for n in all_neighbors if n not in ghost_set]
-        ghost_neighbors = [n for n in all_neighbors if n in ghost_set]
 
+        # Find ghost atoms with exactly 2 connections, both physical.
         if len(physical_neighbors) == 2:
-            # Hydrogen ghost substituents cannot create chirality so are safe
-            # to ignore. Heavy ghost substituents may indicate a chiral centre
-            # at the physical end state, so we skip linearisation and warn.
-            elem_prop = "element0" if is_lambda1 else "element1"
-            heavy_ghost_neighbors = [
-                n
-                for n in ghost_neighbors
-                if mol.atom(n).property(elem_prop).symbol() not in ("H", "Xx", "")
-            ]
-            if not heavy_ghost_neighbors:
-                linearised.add(ghost)
-            else:
+            # Check whether this atom is a chiral centre in the physical end
+            # state using RDKit. If so, linearising to 180° would destroy the
+            # geometry, so skip it and warn.
+            rdatom = rdmol.GetAtomWithIdx(ghost.value())
+            chiral = rdatom.GetChiralTag()
+            if chiral in (
+                _ChiralType.CHI_TETRAHEDRAL_CW,
+                _ChiralType.CHI_TETRAHEDRAL_CCW,
+            ):
                 _logger.warning(
-                    f"  Ring-break ghost atom {ghost.value()} has "
-                    f"{len(heavy_ghost_neighbors)} heavy ghost substituent(s) "
-                    f"in addition to 2 physical neighbours. Linearisation "
-                    f"skipped to preserve potential chirality."
+                    f"  Ring-break ghost atom {ghost.value()} is a chiral "
+                    f"centre in the physical end state. Linearisation skipped "
+                    f"to preserve chirality."
                 )
+            else:
+                linearised.add(ghost)
 
     if not linearised:
         return mol, linearised
