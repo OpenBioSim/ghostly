@@ -6,6 +6,7 @@ Changelog
 
 * Please add an item to this CHANGELOG for any new features or bug fixes when creating a PR.
 * Add linear spacer modification for ring-breaking ghost bridges.
+* Remove cross-bond angles spanning ring-making/breaking bonds in the state where the bond is absent.
 
 [2025.2.0](https://github.com/openbiosim/loch/compare/2025.1.0...2025.2.0) - Mar 2026
 -------------------------------------------------------------------------------------

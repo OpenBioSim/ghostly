@@ -217,6 +217,28 @@ def modify(
         connectivity0 = _create_connectivity(_morph.link_to_reference(mol))
         connectivity1 = _create_connectivity(_morph.link_to_perturbed(mol))
 
+        # Detect ring-making/breaking bonds: bonds present in one end state
+        # but not the other. Angles spanning these bonds must be removed in
+        # the end state where the bond is absent.
+        _bonds0 = {
+            (
+                min(b.atom0().value(), b.atom1().value()),
+                max(b.atom0().value(), b.atom1().value()),
+            )
+            for b in connectivity0.get_bonds()
+        }
+        _bonds1 = {
+            (
+                min(b.atom0().value(), b.atom1().value()),
+                max(b.atom0().value(), b.atom1().value()),
+            )
+            for b in connectivity1.get_bonds()
+        }
+        # Ring-making bonds (present at λ=1 only): remove spanning angles in angle0.
+        _ring_making_bonds = _bonds1 - _bonds0
+        # Ring-breaking bonds (present at λ=0 only): remove spanning angles in angle1.
+        _ring_breaking_bonds = _bonds0 - _bonds1
+
         # Find the indices of the ghost atoms at each end state.
         ghosts0 = [
             _SireMol.AtomIdx(i)
@@ -429,6 +451,13 @@ def modify(
             mol, ghosts0, modifications, skip_ghosts=linearised0, is_lambda1=False
         )
 
+        # Remove angles that span ring-making bonds in the state where those
+        # bonds do not yet exist.
+        if _ring_making_bonds:
+            mol = _remove_cross_bond_angles(
+                mol, _ring_making_bonds, modifications, is_lambda1=False
+            )
+
         # Soften any surviving mixed ghost/physical dihedrals.
         mol = _soften_mixed_dihedrals(
             mol,
@@ -542,6 +571,13 @@ def modify(
         mol = _remove_ghost_centre_angles(
             mol, ghosts1, modifications, skip_ghosts=linearised1, is_lambda1=True
         )
+
+        # Remove angles that span ring-breaking bonds in the state where those
+        # bonds no longer exist.
+        if _ring_breaking_bonds:
+            mol = _remove_cross_bond_angles(
+                mol, _ring_breaking_bonds, modifications, is_lambda1=True
+            )
 
         # Soften any surviving mixed ghost/physical dihedrals.
         mol = _soften_mixed_dihedrals(
@@ -2389,6 +2425,82 @@ def _remove_ghost_centre_angles(
         mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
 
     # Return the updated molecule.
+    return mol
+
+
+def _remove_cross_bond_angles(mol, changing_bonds, modifications, is_lambda1=False):
+    r"""
+    Remove angle terms that span a ring-making or ring-breaking bond in the
+    end state where that bond does not exist. Such angles are parameterised
+    for the bonded geometry and constrain the two atoms toward each other
+    even when no bond is present, producing large LJ repulsion at the
+    nonbonded/bonded lambda boundary.
+
+        A - B - C
+              |
+              (missing bond)
+
+    If the B-C bond is absent in this end state, the angle A-B-C is removed.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    changing_bonds : set of (int, int)
+        Pairs of atom index values for bonds that change between end states.
+        Pass ring-making bonds for is_lambda1=False, ring-breaking bonds for
+        is_lambda1=True.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to modify angles at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    if not changing_bonds:
+        return mol
+
+    info = mol.info()
+
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
+
+    angles = mol.property("angle" + suffix)
+    new_angles = _SireMM.ThreeAtomFunctions(mol.info())
+    modified = False
+
+    for p in angles.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+
+        i, j, k = idx0.value(), idx1.value(), idx2.value()
+        pair_ij = (min(i, j), max(i, j))
+        pair_jk = (min(j, k), max(j, k))
+
+        if pair_ij in changing_bonds or pair_jk in changing_bonds:
+            _logger.debug(f"  Removing cross-bond angle: [{i}-{j}-{k}], {p.function()}")
+            modifications[mod_key]["removed_angles"].append(f"{i},{j},{k}")
+            modified = True
+        else:
+            new_angles.set(idx0, idx1, idx2, p.function())
+
+    if modified:
+        mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
+
     return mol
 
 
