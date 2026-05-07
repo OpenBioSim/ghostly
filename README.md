@@ -23,6 +23,31 @@ differences.
 2) To avoid spurious coupling between the physical and ghost systems, which
 can affect the equilibrium geometry of the physical system.
 
+Ghostly implements many extensions beyond the original modification scheme to
+handle the diversity of perturbations encountered in practice:
+
+- **Anchor selection scoring:** physical anchor atoms are scored to avoid
+  transmuting or bridge atoms, preventing geometrically inconsistent constraints.
+- **Ring and sp2 bridge handling:** angle stiffening is skipped by default for
+  ring and sp2 bridges, where local geometry already constrains the ghost and
+  90° stiffening would introduce significant strain. It can be re-enabled via
+  `--stiffen-ring-bridges` and `--stiffen-sp2-bridges`.
+- **Residual term cleanup:** a post-processing pass removes mixed improper
+  dihedrals and cross-bridge dihedrals missed by the per-bridge junction
+  handlers, as well as angles where a ghost atom is the central atom and both
+  terminal atoms are physical.
+- **Mixed dihedral softening:** surviving mixed ghost/physical dihedrals can
+  be softened via `--soften-anchors` to allow ghost groups to reorient and
+  avoid steric clashes at small λ.
+- **Rotamer stiffening:** `--stiffen-rotamers` replaces rotatable sp3 anchor
+  dihedrals with a stiff single-well cosine to control ghost orientation
+  through flexible bonds.
+- **Ring-breaking perturbations:** adjacent bridges with independent ghost
+  groups retain each other as physical neighbours; angles with a ghost central
+  atom spanning two physical neighbours are replaced by a linear spacer
+  (180°, soft force constant); and angles and dihedrals spanning the
+  ring-making/breaking bond are removed in the state where that bond is absent.
+
 Ghostly is incorporated into the [SOMD2](https://github.com/openbiosim/somd2)
 free-energy perturbation engine.
 

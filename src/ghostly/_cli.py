@@ -206,6 +206,21 @@ def run():
     )
 
     parser.add_argument(
+        "--linearise-ring-break",
+        action=argparse.BooleanOptionalAction,
+        help="""
+             Apply a linear spacer modification to ghost atoms that bridge two
+             physical atoms (ring-breaking topology). Instead of removing the
+             P1-G-P2 angle, this sets it to 180 degrees with force constant
+             k-soft and reduces the ghost bond force constants to k-soft.
+             Recommended for ring-breaking and chain-expansion perturbations.
+             Disabled by default as it is experimental.
+             """,
+        default=False,
+        required=False,
+    )
+
+    parser.add_argument(
         "--output-prefix",
         type=str,
         help="File prefix for the output file.",
@@ -369,6 +384,7 @@ def run():
             k_rotamer=k_rotamer.value(),
             stiffen_ring_bridges=args.stiffen_ring_bridges,
             stiffen_sp2_bridges=args.stiffen_sp2_bridges,
+            linearise_ring_break=args.linearise_ring_break,
         )
     except Exception as e:
         logger.error(
