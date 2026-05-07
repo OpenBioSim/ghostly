@@ -45,8 +45,8 @@ handle the diversity of perturbations encountered in practice:
 - **Ring-breaking perturbations:** adjacent bridges with independent ghost
   groups retain each other as physical neighbours; angles with a ghost central
   atom spanning two physical neighbours are replaced by a linear spacer
-  (180°, soft force constant); and angles spanning the ring-making/breaking
-  bond are removed in the state where that bond is absent.
+  (180°, soft force constant); and angles and dihedrals spanning the
+  ring-making/breaking bond are removed in the state where that bond is absent.
 
 Ghostly is incorporated into the [SOMD2](https://github.com/openbiosim/somd2)
 free-energy perturbation engine.

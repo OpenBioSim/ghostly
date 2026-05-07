@@ -451,10 +451,16 @@ def modify(
             mol, ghosts0, modifications, skip_ghosts=linearised0, is_lambda1=False
         )
 
-        # Remove angles that span ring-making bonds in the state where those
-        # bonds do not yet exist.
+        # Remove angles, dihedrals, and impropers that span ring-making bonds
+        # in the state where those bonds do not yet exist.
         if _ring_making_bonds:
             mol = _remove_cross_bond_angles(
+                mol, _ring_making_bonds, modifications, is_lambda1=False
+            )
+            mol = _remove_cross_bond_dihedrals(
+                mol, _ring_making_bonds, modifications, is_lambda1=False
+            )
+            mol = _remove_cross_bond_impropers(
                 mol, _ring_making_bonds, modifications, is_lambda1=False
             )
 
@@ -572,10 +578,16 @@ def modify(
             mol, ghosts1, modifications, skip_ghosts=linearised1, is_lambda1=True
         )
 
-        # Remove angles that span ring-breaking bonds in the state where those
-        # bonds no longer exist.
+        # Remove angles, dihedrals, and impropers that span ring-breaking bonds
+        # in the state where those bonds no longer exist.
         if _ring_breaking_bonds:
             mol = _remove_cross_bond_angles(
+                mol, _ring_breaking_bonds, modifications, is_lambda1=True
+            )
+            mol = _remove_cross_bond_dihedrals(
+                mol, _ring_breaking_bonds, modifications, is_lambda1=True
+            )
+            mol = _remove_cross_bond_impropers(
                 mol, _ring_breaking_bonds, modifications, is_lambda1=True
             )
 
@@ -2504,6 +2516,163 @@ def _remove_cross_bond_angles(mol, changing_bonds, modifications, is_lambda1=Fal
 
     if modified:
         mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
+
+    return mol
+
+
+def _remove_cross_bond_dihedrals(mol, changing_bonds, modifications, is_lambda1=False):
+    r"""
+    Remove dihedral terms whose central bond spans a ring-making or
+    ring-breaking bond in the end state where that bond does not exist.
+    Such dihedrals encode the bonded geometry and couple atoms across the
+    missing bond, causing poor overlap between adjacent lambda windows.
+
+        A - B ~~~ C - D
+              (missing bond)
+
+    If the B-C bond is absent in this end state, the dihedral A-B-C-D
+    is removed.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    changing_bonds : set of (int, int)
+        Pairs of atom index values for bonds that change between end states.
+        Pass ring-making bonds for is_lambda1=False, ring-breaking bonds for
+        is_lambda1=True.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to modify dihedrals at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    if not changing_bonds:
+        return mol
+
+    info = mol.info()
+
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
+
+    dihedrals = mol.property("dihedral" + suffix)
+    new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+    modified = False
+
+    for p in dihedrals.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        i, j, k, l = idx0.value(), idx1.value(), idx2.value(), idx3.value()
+        central = (min(j, k), max(j, k))
+
+        if central in changing_bonds:
+            _logger.debug(
+                f"  Removing cross-bond dihedral: [{i}-{j}-{k}-{l}], {p.function()}"
+            )
+            modifications[mod_key]["removed_dihedrals"].append(f"{i},{j},{k},{l}")
+            modified = True
+        else:
+            new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+    if modified:
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
+
+    return mol
+
+
+def _remove_cross_bond_impropers(mol, changing_bonds, modifications, is_lambda1=False):
+    """
+    Remove improper dihedral terms that involve both atoms of a ring-making or
+    ring-breaking bond in the end state where that bond does not exist.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    changing_bonds : set of (int, int)
+        Pairs of atom index values for bonds that change between end states.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to modify impropers at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    if not changing_bonds:
+        return mol
+
+    info = mol.info()
+
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
+
+    impropers = mol.property("improper" + suffix)
+    new_impropers = _SireMM.FourAtomFunctions(mol.info())
+    modified = False
+
+    for p in impropers.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        atoms = {idx0.value(), idx1.value(), idx2.value(), idx3.value()}
+
+        if any(a in atoms and b in atoms for a, b in changing_bonds):
+            _logger.debug(
+                f"  Removing cross-bond improper: "
+                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
+                f"{p.function()}"
+            )
+            modifications[mod_key]["removed_dihedrals"].append(
+                f"{idx0.value()},{idx1.value()},{idx2.value()},{idx3.value()}"
+            )
+            modified = True
+        else:
+            new_impropers.set(idx0, idx1, idx2, idx3, p.function())
+
+    if modified:
+        mol = (
+            mol.edit()
+            .set_property("improper" + suffix, new_impropers)
+            .molecule()
+            .commit()
+        )
 
     return mol
 
