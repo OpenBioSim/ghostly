@@ -1964,7 +1964,7 @@ def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
 def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=False):
     r"""
     Remove dihedral terms that couple ghost and physical regions but were
-    not caught by the per-bridge junction handlers. This covers two cases:
+    not caught by the per-bridge junction handlers. This covers three cases:
 
     1. Cross-bridge: both terminal atoms are ghost and both middle atoms
        are physical. This arises when two ghost groups have adjacent bridge
@@ -1990,6 +1990,22 @@ def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=Fals
             R3          R4
 
        Removed dihedrals: e.g. R1-X1-DR-X2, X1-DR-X2-R2
+
+    3. Bridge extension: one terminal is a physical bridge atom and the
+       remaining three atoms are ghost. This arises when the ghost group
+       contains a ring (e.g. cyclopropyl): the ring creates additional
+       bond paths so that dihedrals of the form X-DR1-DR2-DR3 reach from
+       the bridge into the ring interior. The per-bridge handlers only
+       remove dihedrals where the ghost terminal is the directly-bonded
+       ghost neighbour of the bridge; deeper ring atoms are missed.
+
+            DR2---DR3
+           /         \
+          X---DR1     DR4
+               \
+                DR5
+
+       Removed dihedrals: e.g. X-DR1-DR2-DR3, DR3-DR2-DR1-X
 
     Parameters
     ----------
@@ -2060,9 +2076,26 @@ def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=Fals
             and (idx1 in ghosts or idx2 in ghosts)
         )
 
-        if cross_bridge or ghost_middle:
+        # Case 3: One terminal physical (bridge), three atoms ghost
+        # (bridge-into-ring extension). The per-bridge handlers only match
+        # the directly-bonded ghost neighbour as the ghost terminal, so
+        # dihedrals that continue into a ghost ring are missed.
+        bridge_extension = (
+            idx0 not in ghosts and idx1 in ghosts and idx2 in ghosts and idx3 in ghosts
+        ) or (
+            idx0 in ghosts and idx1 in ghosts and idx2 in ghosts and idx3 not in ghosts
+        )
+
+        if cross_bridge or ghost_middle or bridge_extension:
+            case = (
+                "cross-bridge"
+                if cross_bridge
+                else "ghost-middle"
+                if ghost_middle
+                else "bridge-extension"
+            )
             _logger.debug(
-                f"  Removing residual ghost dihedral: "
+                f"  Removing residual ghost dihedral ({case}): "
                 f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
                 f"{p.function()}"
             )

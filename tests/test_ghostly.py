@@ -26,8 +26,12 @@ def test_hexane_to_propane():
     # No angles should be removed.
     assert angles.num_functions() == new_angles.num_functions()
 
-    # Six dihedrals should be removed.
-    assert dihedrals.num_functions() - 6 == new_dihedrals.num_functions()
+    # Nine dihedrals should be removed: six cross-bridge terms caught by the
+    # terminal junction handler, plus three bridge-extension terms
+    # (3-4-5-{17,18,19}) where the real bridge atom (3) is at one terminal
+    # and three ghost atoms form the rest of the dihedral path into the
+    # ghost chain.
+    assert dihedrals.num_functions() - 9 == new_dihedrals.num_functions()
 
     # Create dihedral IDs for the missing dihedrals.
 
@@ -40,6 +44,10 @@ def test_hexane_to_propane():
         (AtomIdx(11), AtomIdx(2), AtomIdx(3), AtomIdx(14)),
         (AtomIdx(12), AtomIdx(2), AtomIdx(3), AtomIdx(14)),
         (AtomIdx(12), AtomIdx(2), AtomIdx(3), AtomIdx(13)),
+        # Bridge-extension dihedrals into the ghost chain.
+        (AtomIdx(3), AtomIdx(4), AtomIdx(5), AtomIdx(17)),
+        (AtomIdx(3), AtomIdx(4), AtomIdx(5), AtomIdx(18)),
+        (AtomIdx(3), AtomIdx(4), AtomIdx(5), AtomIdx(19)),
     ]
 
     # Store the molecular info.
@@ -315,8 +323,11 @@ def test_ejm49_to_ejm31():
     # The number of angles should remain the same at lambda = 1.
     assert angles1.num_functions() == new_angles1.num_functions()
 
-    # The number of dihedrals should be four fewer at lambda = 1.
-    assert dihedrals1.num_functions() - 4 == new_dihedrals1.num_functions()
+    # The number of dihedrals should be eight fewer at lambda = 1: four caught
+    # by the triple junction handler, plus four bridge-extension terms
+    # (17-20-{21,25}-{22,24,34,38}) where the real bridge atom (17) is at one
+    # terminal and three ghost atoms continue into the ghost group.
+    assert dihedrals1.num_functions() - 8 == new_dihedrals1.num_functions()
 
     # The number of impropers should be six fewer at lambda = 1.
     assert improper1.num_functions() - 6 == new_improper1.num_functions()
@@ -354,6 +365,11 @@ def test_ejm49_to_ejm31():
         (AtomIdx(18), AtomIdx(17), AtomIdx(20), AtomIdx(25)),
         (AtomIdx(20), AtomIdx(17), AtomIdx(16), AtomIdx(33)),
         (AtomIdx(14), AtomIdx(16), AtomIdx(17), AtomIdx(20)),
+        # Bridge-extension dihedrals into the ghost group.
+        (AtomIdx(17), AtomIdx(20), AtomIdx(21), AtomIdx(22)),
+        (AtomIdx(17), AtomIdx(20), AtomIdx(21), AtomIdx(34)),
+        (AtomIdx(17), AtomIdx(20), AtomIdx(25), AtomIdx(24)),
+        (AtomIdx(17), AtomIdx(20), AtomIdx(25), AtomIdx(38)),
     ]
 
     # Check that the missing dihedrals are in the original dihedrals at lambda = 1.
@@ -462,6 +478,73 @@ def test_ejm49_to_ejm31():
         check_improper(info, new_improper1.potentials(), *improper)
         for improper in missing_impropers1
     )
+
+
+def test_ejm31_to_jmc28():
+    """
+    Test ghost atom modifications for the TYK2 ligands EJM31 to JMC28.
+
+    This perturbation involves an appearing methylcyclopropyl group (atoms
+    32-42) attached at atom 32 to real bridge atom 17. The cyclopropyl ring
+    creates dihedral paths of the form 17-32-33-* and 17-32-34-* that extend
+    from the real bridge into the ghost ring interior. These bridge-extension
+    dihedrals must be removed to avoid spurious torsional coupling between
+    the ghost ring and the real scaffold at lambda = 0.
+    """
+
+    mols = sr.load_test_files("ejm31_jmc28.s3")
+
+    dihedrals0 = mols[0].property("dihedral0")
+    dihedrals1 = mols[0].property("dihedral1")
+
+    new_mols, _ = modify(mols)
+
+    new_dihedrals0 = new_mols[0].property("dihedral0")
+    new_dihedrals1 = new_mols[0].property("dihedral1")
+
+    from sire.legacy.Mol import AtomIdx
+
+    info = mols[0].info()
+
+    # At lambda = 0, the cyclopropyl group (atoms 32-42) is appearing (ghost).
+    # The per-bridge handlers remove five dihedrals; the bridge-extension pass
+    # removes six more (17-32-33-{34,35,38} and 17-32-34-{33,36,37}).
+    assert dihedrals0.num_functions() - 11 == new_dihedrals0.num_functions()
+
+    # These six bridge-extension dihedrals should be absent after modification.
+    bridge_extension0 = [
+        (AtomIdx(17), AtomIdx(32), AtomIdx(33), AtomIdx(34)),
+        (AtomIdx(17), AtomIdx(32), AtomIdx(33), AtomIdx(35)),
+        (AtomIdx(17), AtomIdx(32), AtomIdx(33), AtomIdx(38)),
+        (AtomIdx(17), AtomIdx(32), AtomIdx(34), AtomIdx(33)),
+        (AtomIdx(17), AtomIdx(32), AtomIdx(34), AtomIdx(36)),
+        (AtomIdx(17), AtomIdx(32), AtomIdx(34), AtomIdx(37)),
+    ]
+
+    # Check all bridge-extension dihedrals were present in the original.
+    assert all(
+        check_dihedral(info, dihedrals0.potentials(), *d) for d in bridge_extension0
+    )
+
+    # Check all bridge-extension dihedrals are absent after modification.
+    assert not any(
+        check_dihedral(info, new_dihedrals0.potentials(), *d) for d in bridge_extension0
+    )
+
+    # The anchor dihedrals (16-17-32-{33,34,42}) must survive: they are
+    # real-real-ghost-ghost and are intentionally kept to prevent flapping.
+    anchor0 = [
+        (AtomIdx(16), AtomIdx(17), AtomIdx(32), AtomIdx(33)),
+        (AtomIdx(16), AtomIdx(17), AtomIdx(32), AtomIdx(34)),
+        (AtomIdx(16), AtomIdx(17), AtomIdx(32), AtomIdx(42)),
+    ]
+
+    assert all(check_dihedral(info, new_dihedrals0.potentials(), *d) for d in anchor0)
+
+    # At lambda = 1, the single-carbon group (atom 19) is disappearing (ghost).
+    # The per-bridge handlers remove five dihedrals; no bridge-extension terms
+    # arise since atom 19 is terminal (no further ghost neighbours).
+    assert dihedrals1.num_functions() - 5 == new_dihedrals1.num_functions()
 
 
 def check_angle(info, potentials, idx0, idx1, idx2):

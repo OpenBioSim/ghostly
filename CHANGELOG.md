@@ -7,6 +7,7 @@ Changelog
 * Please add an item to this CHANGELOG for any new features or bug fixes when creating a PR.
 * Add linear spacer modification for ring-breaking ghost bridges.
 * Remove cross-bond angles spanning ring-making/breaking bonds in the state where the bond is absent.
+* Fixed missing removal of bridge-extension dihedrals (`real–ghost–ghost–ghost`) that arise when a ghost group contains a ring, e.g. cyclopropyl, where the ring topology creates spurious torsional coupling between the real scaffold and the ghost ring interior.
 
 [2025.2.0](https://github.com/openbiosim/loch/compare/2025.1.0...2025.2.0) - Mar 2026
 -------------------------------------------------------------------------------------
