@@ -9,9 +9,9 @@ loguru = "*"
 
 [target.linux-64.dependencies]
 # main
-biosimspace = ">=2026.1.0,<2026.2.0"
+#biosimspace = ">=2026.1.0,<2026.2.0"
 # devel
-#biosimspace = "==2026.2.0.dev"
+biosimspace = "==2026.2.0.dev"
 
 [target.linux-aarch64.dependencies]
 # biosimspace/sire not available as conda packages on linux-aarch64;
@@ -19,15 +19,15 @@ biosimspace = ">=2026.1.0,<2026.2.0"
 
 [target.osx-arm64.dependencies]
 # main
-biosimspace = ">=2026.1.0,<2026.2.0"
+#biosimspace = ">=2026.1.0,<2026.2.0"
 # devel
-#biosimspace = "==2026.2.0.dev"
+biosimspace = "==2026.2.0.dev"
 
 [target.win-64.dependencies]
 # main
-biosimspace = ">=2026.1.0,<2026.2.0"
+#biosimspace = ">=2026.1.0,<2026.2.0"
 # devel
-#biosimspace = "==2026.2.0.dev"
+biosimspace = "==2026.2.0.dev"
 
 [feature.test.dependencies]
 pytest = "*"
