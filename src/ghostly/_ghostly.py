@@ -2466,24 +2466,32 @@ def _ghost_in_cycle(atom_idx, adj):
     Return True if ``atom_idx`` lies on a cycle in the ghost subgraph described
     by ``adj`` (an integer-keyed adjacency dict).
 
-    Removes the atom from the graph and does a BFS from the first neighbour.
-    If any other neighbour is reachable without passing through the atom,
-    they form a cycle.
+    Removes the atom from the graph and does a BFS from each neighbour in turn.
+    If any neighbour can reach another neighbour of the atom without passing
+    through the atom itself, they lie on a cycle together.
+
+    We must try each neighbour as a start rather than only ``neighbors[0]``
+    because pendant neighbours (bonded only to ``atom_idx`` within the ghost
+    subgraph) cannot reach the cycle members — e.g. a methyl substituent on a
+    cyclopropyl carbon would cause a false-negative if picked first.
     """
     neighbors = adj.get(atom_idx, [])
     if len(neighbors) < 2:
         return False
 
-    visited = {neighbors[0]}
-    queue = [neighbors[0]]
-    while queue:
-        node = queue.pop(0)
-        for n in adj.get(node, []):
-            if n != atom_idx and n not in visited:
-                visited.add(n)
-                queue.append(n)
+    for start in neighbors:
+        visited = {start}
+        queue = [start]
+        while queue:
+            node = queue.pop(0)
+            for n in adj.get(node, []):
+                if n != atom_idx and n not in visited:
+                    visited.add(n)
+                    queue.append(n)
+        if any(n in visited for n in neighbors if n != start):
+            return True
 
-    return any(n in visited for n in neighbors[1:])
+    return False
 
 
 def _ring_constrained_ghosts(bridges, ghosts, connectivity):
