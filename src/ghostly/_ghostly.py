@@ -2445,26 +2445,32 @@ def _remove_ghost_centre_angles(
 
 
 def _ghost_adjacency(ghosts, connectivity):
-    """Build an adjacency dict for the ghost-atom subgraph."""
-    ghost_set = set(ghosts)
-    adj = {g: [] for g in ghost_set}
-    for g in ghost_set:
+    """Build an adjacency dict for the ghost-atom subgraph, keyed by integer atom index.
+
+    Using integer indices avoids any AtomIdx Python-wrapper hashing
+    inconsistencies when looking up atoms returned by connections_to().
+    """
+    ghost_indices = {g.value() for g in ghosts}
+    adj = {i: [] for i in ghost_indices}
+    for g in ghosts:
+        i = g.value()
         for c in connectivity.connections_to(g):
-            if c in ghost_set:
-                adj[g].append(c)
+            j = c.value()
+            if j in ghost_indices:
+                adj[i].append(j)
     return adj
 
 
-def _ghost_in_cycle(atom, adj):
+def _ghost_in_cycle(atom_idx, adj):
     """
-    Return True if ``atom`` lies on a cycle in the ghost subgraph described
-    by ``adj``.
+    Return True if ``atom_idx`` lies on a cycle in the ghost subgraph described
+    by ``adj`` (an integer-keyed adjacency dict).
 
-    Removes ``atom`` from the graph and does a BFS from the first neighbour.
-    If any other neighbour of ``atom`` is reachable without passing through
-    ``atom``, the three form a cycle.
+    Removes the atom from the graph and does a BFS from the first neighbour.
+    If any other neighbour is reachable without passing through the atom,
+    they form a cycle.
     """
-    neighbors = adj.get(atom, [])
+    neighbors = adj.get(atom_idx, [])
     if len(neighbors) < 2:
         return False
 
@@ -2473,7 +2479,7 @@ def _ghost_in_cycle(atom, adj):
     while queue:
         node = queue.pop(0)
         for n in adj.get(node, []):
-            if n != atom and n not in visited:
+            if n != atom_idx and n not in visited:
                 visited.add(n)
                 queue.append(n)
 
@@ -2503,13 +2509,13 @@ def _ring_constrained_ghosts(bridges, ghosts, connectivity):
     ring_ghosts = set()
     for ghost_list in bridges.values():
         for g in ghost_list:
-            if _ghost_in_cycle(g, adj):
-                ring_ghosts.add(g)
+            if _ghost_in_cycle(g.value(), adj):
+                ring_ghosts.add(g.value())
 
     if ring_ghosts:
         _logger.debug(
             f"Ring-constrained immediate ghosts (anchors will be zeroed): "
-            f"[{', '.join(str(g.value()) for g in ring_ghosts)}]"
+            f"[{', '.join(str(i) for i in sorted(ring_ghosts))}]"
         )
 
     return ring_ghosts
@@ -2554,11 +2560,11 @@ def _soften_mixed_dihedrals(
     soften_anchors : float, optional
         Scale factor for mixed dihedral force constants (0.0 to 1.0).
 
-    ring_ghosts : set, optional
-        Ghost atoms that are both directly bonded to a bridge and part of a
-        ring in the ghost subgraph.  Any surviving mixed dihedral whose
-        bridge-adjacent ghost atom is in this set is removed regardless of
-        ``soften_anchors``.
+    ring_ghosts : set of int, optional
+        Integer atom indices of ghost atoms that are both directly bonded to a
+        bridge and part of a ring in the ghost subgraph.  Any surviving mixed
+        dihedral whose bridge-adjacent ghost atom is in this set is removed
+        regardless of ``soften_anchors``.
 
     is_lambda1 : bool, optional
         Whether to modify dihedrals at lambda = 1.
@@ -2620,7 +2626,7 @@ def _soften_mixed_dihedrals(
             effective_scale = soften_anchors
             if ring_ghosts:
                 for i, a in enumerate(atoms):
-                    if a in ring_ghosts:
+                    if a.value() in ring_ghosts:
                         neighbors_in_dih = []
                         if i > 0:
                             neighbors_in_dih.append(atoms[i - 1])
