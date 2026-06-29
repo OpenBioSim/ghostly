@@ -34,14 +34,15 @@ try:
 except Exception:
     from loguru import logger as _logger
 
-import platform as _platform
+import sys as _sys
 
-if _platform.system() == "Windows":
-    _lam_sym = "lambda"
-else:
+try:
+    "λ".encode(_sys.stdout.encoding or "utf-8")
     _lam_sym = "λ"
+except (UnicodeEncodeError, LookupError):
+    _lam_sym = "lambda"
 
-del _platform
+del _sys
 
 
 def modify(
@@ -55,6 +56,7 @@ def modify(
     k_rotamer=50,
     stiffen_ring_bridges=False,
     stiffen_sp2_bridges=False,
+    linearise_ring_break=False,
 ):
     """
     Apply modifications to ghost atom bonded terms to avoid non-physical
@@ -139,6 +141,17 @@ def modify(
         (False). Enabling this restores the original behaviour but a warning
         will be logged to flag the potential strain issue.
 
+    linearise_ring_break : bool, optional
+        Whether to apply a linear spacer modification to ghost atoms that
+        bridge two physical atoms (the ring-breaking topology). Instead of
+        removing the P1-G-P2 angle (default behaviour), this sets it to 180°
+        with force constant ``k_soft`` and softens the G-P1 and G-P2 bonds
+        to ``k_soft``. The linear arrangement minimises the influence of the
+        ghost on the physical geometry while keeping it loosely tethered
+        between the two bridge atoms. All dihedrals involving G are removed
+        as they are degenerate at 180°. Disabled by default as it is
+        experimental; enable for ring-breaking or chain-expansion perturbations.
+
     Returns
     -------
 
@@ -185,6 +198,8 @@ def modify(
         "softened_angles": {},
         "softened_dihedrals": [],
         "stiffened_dihedrals": [],
+        "linearised_ring_break": [],
+        "softened_bonds": {},
     }
     modifications["lambda_1"] = {
         "removed_angles": [],
@@ -193,6 +208,8 @@ def modify(
         "softened_angles": {},
         "softened_dihedrals": [],
         "stiffened_dihedrals": [],
+        "linearised_ring_break": [],
+        "softened_bonds": {},
     }
 
     for mol in pert_mols:
@@ -393,9 +410,31 @@ def modify(
             mol, ghosts0, modifications, is_lambda1=False
         )
 
+        # Optionally apply the linear spacer modification to ghost atoms that
+        # bridge two physical atoms (ring-breaking topology).
+        linearised0 = set()
+        if linearise_ring_break:
+            mol, linearised0 = _linearise_ring_break(
+                mol,
+                ghosts0,
+                connectivity0,
+                modifications,
+                k_soft=k_soft,
+                is_lambda1=False,
+            )
+
         # Remove any angles where the central atom is ghost and both terminal
         # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
-        mol = _remove_ghost_centre_angles(mol, ghosts0, modifications, is_lambda1=False)
+        mol = _remove_ghost_centre_angles(
+            mol, ghosts0, modifications, skip_ghosts=linearised0, is_lambda1=False
+        )
+
+        # Identify immediate ghost atoms that lie on a ring in the ghost
+        # subgraph: anchor dihedrals through these are redundant and will be
+        # zeroed automatically. Appearing ghosts (ghost at λ=0) form their
+        # ring at λ=1, so connectivity1 is used since that is where the ring
+        # bonds actually exist.
+        ring_ghosts0 = _ring_constrained_ghosts(bridges0, ghosts0, connectivity1)
 
         # Soften any surviving mixed ghost/physical dihedrals.
         mol = _soften_mixed_dihedrals(
@@ -403,6 +442,7 @@ def modify(
             ghosts0,
             modifications,
             soften_anchors=soften_anchors,
+            ring_ghosts=ring_ghosts0,
             is_lambda1=False,
         )
 
@@ -492,9 +532,30 @@ def modify(
             mol, ghosts1, modifications, is_lambda1=True
         )
 
+        # Optionally apply the linear spacer modification to ghost atoms that
+        # bridge two physical atoms (ring-breaking topology).
+        linearised1 = set()
+        if linearise_ring_break:
+            mol, linearised1 = _linearise_ring_break(
+                mol,
+                ghosts1,
+                connectivity1,
+                modifications,
+                k_soft=k_soft,
+                is_lambda1=True,
+            )
+
         # Remove any angles where the central atom is ghost and both terminal
         # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
-        mol = _remove_ghost_centre_angles(mol, ghosts1, modifications, is_lambda1=True)
+        mol = _remove_ghost_centre_angles(
+            mol, ghosts1, modifications, skip_ghosts=linearised1, is_lambda1=True
+        )
+
+        # Identify immediate ghost atoms that lie on a ring in the ghost
+        # subgraph: anchor dihedrals through these are redundant and will be
+        # zeroed automatically. Disappearing ghosts (ghost at λ=1) have their
+        # ring bonds in connectivity0 since that is where they are real.
+        ring_ghosts1 = _ring_constrained_ghosts(bridges1, ghosts1, connectivity0)
 
         # Soften any surviving mixed ghost/physical dihedrals.
         mol = _soften_mixed_dihedrals(
@@ -502,6 +563,7 @@ def modify(
             ghosts1,
             modifications,
             soften_anchors=soften_anchors,
+            ring_ghosts=ring_ghosts1,
             is_lambda1=True,
         )
 
@@ -1917,7 +1979,7 @@ def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
 def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=False):
     r"""
     Remove dihedral terms that couple ghost and physical regions but were
-    not caught by the per-bridge junction handlers. This covers two cases:
+    not caught by the per-bridge junction handlers. This covers three cases:
 
     1. Cross-bridge: both terminal atoms are ghost and both middle atoms
        are physical. This arises when two ghost groups have adjacent bridge
@@ -1943,6 +2005,22 @@ def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=Fals
             R3          R4
 
        Removed dihedrals: e.g. R1-X1-DR-X2, X1-DR-X2-R2
+
+    3. Bridge extension: one terminal is a physical bridge atom and the
+       remaining three atoms are ghost. This arises when the ghost group
+       contains a ring (e.g. cyclopropyl): the ring creates additional
+       bond paths so that dihedrals of the form X-DR1-DR2-DR3 reach from
+       the bridge into the ring interior. The per-bridge handlers only
+       remove dihedrals where the ghost terminal is the directly-bonded
+       ghost neighbour of the bridge; deeper ring atoms are missed.
+
+            DR2---DR3
+           /         \
+          X---DR1     DR4
+               \
+                DR5
+
+       Removed dihedrals: e.g. X-DR1-DR2-DR3, DR3-DR2-DR1-X
 
     Parameters
     ----------
@@ -2013,9 +2091,26 @@ def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=Fals
             and (idx1 in ghosts or idx2 in ghosts)
         )
 
-        if cross_bridge or ghost_middle:
+        # Case 3: One terminal physical (bridge), three atoms ghost
+        # (bridge-into-ring extension). The per-bridge handlers only match
+        # the directly-bonded ghost neighbour as the ghost terminal, so
+        # dihedrals that continue into a ghost ring are missed.
+        bridge_extension = (
+            idx0 not in ghosts and idx1 in ghosts and idx2 in ghosts and idx3 in ghosts
+        ) or (
+            idx0 in ghosts and idx1 in ghosts and idx2 in ghosts and idx3 not in ghosts
+        )
+
+        if cross_bridge or ghost_middle or bridge_extension:
+            case = (
+                "cross-bridge"
+                if cross_bridge
+                else "ghost-middle"
+                if ghost_middle
+                else "bridge-extension"
+            )
             _logger.debug(
-                f"  Removing residual ghost dihedral: "
+                f"  Removing residual ghost dihedral ({case}): "
                 f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
                 f"{p.function()}"
             )
@@ -2039,7 +2134,221 @@ def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=Fals
     return mol
 
 
-def _remove_ghost_centre_angles(mol, ghosts, modifications, is_lambda1=False):
+def _linearise_ring_break(
+    mol, ghosts, connectivity, modifications, k_soft=5, is_lambda1=False
+):
+    r"""
+    Apply a linear spacer modification to ghost atoms that bridge exactly two
+    physical atoms (the ring-breaking topology P1-G-P2). Instead of removing
+    the P1-G-P2 angle, this sets it to 180° with a soft force constant and
+    reduces the G-P1 and G-P2 bond force constants to k_soft. All dihedrals
+    involving G are removed as they are degenerate at 180°.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the current end state.
+
+    connectivity : sire.legacy.Mol.Connectivity
+        The connectivity object for the current end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    k_soft : float, optional
+        Force constant for the linearised angle and softened bonds
+        (kcal/mol/rad² for angles, kcal/mol/Å² for bonds).
+
+    is_lambda1 : bool, optional
+        Whether to modify terms at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+
+    linearised : set
+        Ghost atoms handled by this function (passed to
+        _remove_ghost_centre_angles as skip_ghosts).
+    """
+
+    if not ghosts:
+        return mol, set()
+
+    info = mol.info()
+    suffix = "1" if is_lambda1 else "0"
+    mod_key = "lambda_1" if is_lambda1 else "lambda_0"
+
+    from math import pi
+    from sire.legacy.CAS import Symbol
+
+    ghost_set = set(ghosts)
+    theta = Symbol("theta")
+    r = Symbol("r")
+
+    # Build an RDKit molecule for the physical end state so we can query
+    # chirality directly rather than inferring it from substituent counts.
+    from sire.convert import to_rdkit as _to_rdkit
+    from rdkit.Chem import ChiralType as _ChiralType
+
+    phys_mol = (
+        _morph.link_to_reference(mol) if is_lambda1 else _morph.link_to_perturbed(mol)
+    )
+    rdmol = _to_rdkit(phys_mol)
+
+    linearised = set()
+    for ghost in ghosts:
+        all_neighbors = list(connectivity.connections_to(ghost))
+        physical_neighbors = [n for n in all_neighbors if n not in ghost_set]
+
+        # Find ghost atoms with exactly 2 connections, both physical.
+        if len(physical_neighbors) == 2:
+            # Check whether this atom is a chiral centre in the physical end
+            # state using RDKit. If so, linearising to 180° would destroy the
+            # geometry, so skip it and warn.
+            rdatom = rdmol.GetAtomWithIdx(ghost.value())
+            chiral = rdatom.GetChiralTag()
+            if chiral in (
+                _ChiralType.CHI_TETRAHEDRAL_CW,
+                _ChiralType.CHI_TETRAHEDRAL_CCW,
+            ):
+                _logger.warning(
+                    f"  Ring-break ghost atom {ghost.value()} is a chiral "
+                    f"centre in the physical end state. Linearisation skipped "
+                    f"to preserve chirality."
+                )
+            else:
+                linearised.add(ghost)
+
+    if not linearised:
+        return mol, linearised
+
+    _logger.debug(
+        f"Applying ring-break linear spacer modifications at "
+        f"{_lam_sym} = {'1' if is_lambda1 else '0'}:"
+    )
+
+    for ghost in linearised:
+        modifications[mod_key]["linearised_ring_break"].append(ghost.value())
+
+    # Modify P1-G-P2 angles: set to 180° with k_soft.
+    angles = mol.property("angle" + suffix)
+    new_angles = _SireMM.ThreeAtomFunctions(mol.info())
+    modified_angles = False
+
+    for p in angles.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+
+        if idx1 in linearised and idx0 not in ghost_set and idx2 not in ghost_set:
+            amber_angle = _SireMM.AmberAngle(k_soft, pi)
+            expression = amber_angle.to_expression(theta)
+            new_angles.set(idx0, idx1, idx2, expression)
+            _logger.debug(
+                f"  Linearising ring-break angle: "
+                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                f"{p.function()} --> {expression}"
+            )
+            modified_angles = True
+        else:
+            new_angles.set(idx0, idx1, idx2, p.function())
+
+    if modified_angles:
+        mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
+
+    # Soften G-P1 and G-P2 bonds, setting r0 to half the physical end-state
+    # value so Du sits midway between P1 and P2 at zero bond energy.
+    phys_suffix = "0" if is_lambda1 else "1"
+    phys_bonds = mol.property("bond" + phys_suffix)
+    phys_r0 = {}
+    for p in phys_bonds.potentials():
+        i0 = info.atom_idx(p.atom0())
+        i1 = info.atom_idx(p.atom1())
+        key = (min(i0.value(), i1.value()), max(i0.value(), i1.value()))
+        phys_r0[key] = _SireMM.AmberBond(p.function(), r).r0()
+
+    bonds = mol.property("bond" + suffix)
+    new_bonds = _SireMM.TwoAtomFunctions(mol.info())
+    modified_bonds = False
+
+    for p in bonds.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+
+        if idx0 in linearised or idx1 in linearised:
+            key = (min(idx0.value(), idx1.value()), max(idx0.value(), idx1.value()))
+            r0 = phys_r0.get(key)
+            if r0 is not None:
+                r0_new = r0 / 2.0
+            else:
+                r0_new = _SireMM.AmberBond(p.function(), r).r0()
+            expression = _SireMM.AmberBond(k_soft, r0_new).to_expression(r)
+            new_bonds.set(idx0, idx1, expression)
+            _logger.debug(
+                f"  Softening ring-break bond: "
+                f"[{idx0.value()}-{idx1.value()}], "
+                f"{p.function()} --> {expression}"
+            )
+            bond_idx = f"{idx0.value()},{idx1.value()}"
+            modifications[mod_key]["softened_bonds"][bond_idx] = {
+                "k": k_soft,
+                "r0": r0_new,
+            }
+            modified_bonds = True
+        else:
+            new_bonds.set(idx0, idx1, p.function())
+
+    if modified_bonds:
+        mol = mol.edit().set_property("bond" + suffix, new_bonds).molecule().commit()
+
+    # Remove all dihedrals involving linearised ghosts (degenerate at 180°).
+    dihedrals = mol.property("dihedral" + suffix)
+    new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+    modified_dihedrals = False
+
+    for p in dihedrals.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        if any(idx in linearised for idx in (idx0, idx1, idx2, idx3)):
+            _logger.debug(
+                f"  Removing ring-break dihedral: "
+                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
+                f"{p.function()}"
+            )
+            dih_idx = ",".join(
+                [
+                    str(i)
+                    for i in (idx0.value(), idx1.value(), idx2.value(), idx3.value())
+                ]
+            )
+            modifications[mod_key]["removed_dihedrals"].append(dih_idx)
+            modified_dihedrals = True
+        else:
+            new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+    if modified_dihedrals:
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
+
+    return mol, linearised
+
+
+def _remove_ghost_centre_angles(
+    mol, ghosts, modifications, skip_ghosts=None, is_lambda1=False
+):
     r"""
     Remove angle terms where the central atom is ghost and both terminal
     atoms are physical. These can arise in ring-breaking topologies where
@@ -2108,8 +2417,13 @@ def _remove_ghost_centre_angles(mol, ghosts, modifications, is_lambda1=False):
         idx2 = info.atom_idx(p.atom2())
 
         # Remove any angle where the central atom is ghost and both
-        # terminal atoms are physical.
-        if idx1 in ghosts and idx0 not in ghosts and idx2 not in ghosts:
+        # terminal atoms are physical, unless already handled by linearisation.
+        if (
+            idx1 in ghosts
+            and idx0 not in ghosts
+            and idx2 not in ghosts
+            and (skip_ghosts is None or idx1 not in skip_ghosts)
+        ):
             _logger.debug(
                 f"  Removing ghost centre angle: "
                 f"[{idx0.value()}-{idx1.value()}-{idx2.value()}], "
@@ -2130,8 +2444,93 @@ def _remove_ghost_centre_angles(mol, ghosts, modifications, is_lambda1=False):
     return mol
 
 
+def _ghost_adjacency(ghosts, connectivity):
+    """Build an adjacency dict for the ghost-atom subgraph, keyed by integer atom index.
+
+    Using integer indices avoids any AtomIdx Python-wrapper hashing
+    inconsistencies when looking up atoms returned by connections_to().
+    """
+    ghost_indices = {g.value() for g in ghosts}
+    adj = {i: [] for i in ghost_indices}
+    for g in ghosts:
+        i = g.value()
+        for c in connectivity.connections_to(g):
+            j = c.value()
+            if j in ghost_indices:
+                adj[i].append(j)
+    return adj
+
+
+def _ghost_in_cycle(atom_idx, adj):
+    """
+    Return True if ``atom_idx`` lies on a cycle in the ghost subgraph described
+    by ``adj`` (an integer-keyed adjacency dict).
+
+    Removes the atom from the graph and does a BFS from each neighbour in turn.
+    If any neighbour can reach another neighbour of the atom without passing
+    through the atom itself, they lie on a cycle together.
+
+    We must try each neighbour as a start rather than only ``neighbors[0]``
+    because pendant neighbours (bonded only to ``atom_idx`` within the ghost
+    subgraph) cannot reach the cycle members — e.g. a methyl substituent on a
+    cyclopropyl carbon would cause a false-negative if picked first.
+    """
+    neighbors = adj.get(atom_idx, [])
+    if len(neighbors) < 2:
+        return False
+
+    for start in neighbors:
+        visited = {start}
+        queue = [start]
+        while queue:
+            node = queue.pop(0)
+            for n in adj.get(node, []):
+                if n != atom_idx and n not in visited:
+                    visited.add(n)
+                    queue.append(n)
+        if any(n in visited for n in neighbors if n != start):
+            return True
+
+    return False
+
+
+def _ring_constrained_ghosts(bridges, ghosts, connectivity):
+    """
+    Return the set of immediate ghost atoms (directly bonded to a bridge)
+    that lie on a cycle within the ghost subgraph.
+
+    For these atoms the ring topology already constrains their orientation
+    relative to the bridge, making anchor dihedrals through them redundant.
+    The ring bonds prevent free rotation around the bridge-ghost bond just as
+    well as an anchor dihedral would, so zeroing the anchor introduces no
+    flapping risk while removing a potential free-energy bias.
+
+    Pass the connectivity of the end state where the ghost atoms are real,
+    since that is where their ring bonds exist: connectivity1 for appearing
+    ghosts (ghost at lambda=0), connectivity0 for disappearing ghosts
+    (ghost at lambda=1).
+    """
+    if not ghosts:
+        return set()
+
+    adj = _ghost_adjacency(ghosts, connectivity)
+    ring_ghosts = set()
+    for ghost_list in bridges.values():
+        for g in ghost_list:
+            if _ghost_in_cycle(g.value(), adj):
+                ring_ghosts.add(g.value())
+
+    if ring_ghosts:
+        _logger.debug(
+            f"Ring-constrained immediate ghosts (anchors will be zeroed): "
+            f"[{', '.join(str(i) for i in sorted(ring_ghosts))}]"
+        )
+
+    return ring_ghosts
+
+
 def _soften_mixed_dihedrals(
-    mol, ghosts, modifications, soften_anchors=1.0, is_lambda1=False
+    mol, ghosts, modifications, soften_anchors=1.0, ring_ghosts=None, is_lambda1=False
 ):
     r"""
     Soften surviving mixed ghost/physical dihedral terms by scaling their
@@ -2144,9 +2543,15 @@ def _soften_mixed_dihedrals(
     atoms start gaining softcore nonbonded interactions but are constrained
     too tightly by bonded terms.
 
-    When ``soften_anchors`` is 1.0 (default), no modifications are made.
-    When 0.0, all mixed dihedrals are removed. Intermediate values scale
-    the force constants.
+    When ``soften_anchors`` is 1.0 (default) and ``ring_ghosts`` is empty,
+    no modifications are made.  When ``soften_anchors`` is 0.0, all mixed
+    dihedrals are removed.  Intermediate values scale the force constants.
+
+    Anchor dihedrals whose bridge-adjacent ghost atom lies on a ring within
+    the ghost subgraph (supplied via ``ring_ghosts``) are always zeroed,
+    regardless of ``soften_anchors``: the ring topology already constrains
+    the ghost orientation, so the anchor is redundant and may introduce a
+    free-energy bias.
 
     Parameters
     ----------
@@ -2163,6 +2568,12 @@ def _soften_mixed_dihedrals(
     soften_anchors : float, optional
         Scale factor for mixed dihedral force constants (0.0 to 1.0).
 
+    ring_ghosts : set of int, optional
+        Integer atom indices of ghost atoms that are both directly bonded to a
+        bridge and part of a ring in the ghost subgraph.  Any surviving mixed
+        dihedral whose bridge-adjacent ghost atom is in this set is removed
+        regardless of ``soften_anchors``.
+
     is_lambda1 : bool, optional
         Whether to modify dihedrals at lambda = 1.
 
@@ -2173,8 +2584,12 @@ def _soften_mixed_dihedrals(
         The updated molecule.
     """
 
-    # Nothing to do if there are no ghost atoms or no softening is requested.
-    if not ghosts or soften_anchors >= 1.0:
+    if ring_ghosts is None:
+        ring_ghosts = set()
+
+    # Nothing to do if there are no ghost atoms, no softening is requested,
+    # and no ring-constrained ghosts require automatic zeroing.
+    if not ghosts or (soften_anchors >= 1.0 and not ring_ghosts):
         return mol
 
     # Store the molecular info.
@@ -2210,12 +2625,31 @@ def _soften_mixed_dihedrals(
 
         if has_ghost and has_physical:
             dih_idx_str = ",".join(str(a.value()) for a in atoms)
-            if soften_anchors > 0.0:
-                scaled = p.function() * soften_anchors
+
+            # Determine the effective scale for this dihedral.  If the
+            # bridge-adjacent ghost (the ghost atom bonded to a physical atom
+            # within the four-atom sequence) lies on a ring in the ghost
+            # subgraph, zero it unconditionally: the ring constrains the ghost
+            # orientation and the anchor is redundant.
+            effective_scale = soften_anchors
+            if ring_ghosts:
+                for i, a in enumerate(atoms):
+                    if a.value() in ring_ghosts:
+                        neighbors_in_dih = []
+                        if i > 0:
+                            neighbors_in_dih.append(atoms[i - 1])
+                        if i < 3:
+                            neighbors_in_dih.append(atoms[i + 1])
+                        if any(n not in ghosts for n in neighbors_in_dih):
+                            effective_scale = 0.0
+                            break
+
+            if effective_scale > 0.0:
+                scaled = p.function() * effective_scale
                 new_dihedrals.set(idx0, idx1, idx2, idx3, scaled)
                 _logger.debug(
                     f"  Softening mixed dihedral: [{dih_idx_str}], "
-                    f"scale={soften_anchors}"
+                    f"scale={effective_scale}"
                 )
                 modifications[mod_key]["softened_dihedrals"].append(dih_idx_str)
             else:
