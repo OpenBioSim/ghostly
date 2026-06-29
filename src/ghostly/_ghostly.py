@@ -429,12 +429,20 @@ def modify(
             mol, ghosts0, modifications, skip_ghosts=linearised0, is_lambda1=False
         )
 
+        # Identify immediate ghost atoms that lie on a ring in the ghost
+        # subgraph: anchor dihedrals through these are redundant and will be
+        # zeroed automatically. Appearing ghosts (ghost at λ=0) form their
+        # ring at λ=1, so connectivity1 is used since that is where the ring
+        # bonds actually exist.
+        ring_ghosts0 = _ring_constrained_ghosts(bridges0, ghosts0, connectivity1)
+
         # Soften any surviving mixed ghost/physical dihedrals.
         mol = _soften_mixed_dihedrals(
             mol,
             ghosts0,
             modifications,
             soften_anchors=soften_anchors,
+            ring_ghosts=ring_ghosts0,
             is_lambda1=False,
         )
 
@@ -543,12 +551,19 @@ def modify(
             mol, ghosts1, modifications, skip_ghosts=linearised1, is_lambda1=True
         )
 
+        # Identify immediate ghost atoms that lie on a ring in the ghost
+        # subgraph: anchor dihedrals through these are redundant and will be
+        # zeroed automatically. Disappearing ghosts (ghost at λ=1) have their
+        # ring bonds in connectivity0 since that is where they are real.
+        ring_ghosts1 = _ring_constrained_ghosts(bridges1, ghosts1, connectivity0)
+
         # Soften any surviving mixed ghost/physical dihedrals.
         mol = _soften_mixed_dihedrals(
             mol,
             ghosts1,
             modifications,
             soften_anchors=soften_anchors,
+            ring_ghosts=ring_ghosts1,
             is_lambda1=True,
         )
 
@@ -1964,7 +1979,7 @@ def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
 def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=False):
     r"""
     Remove dihedral terms that couple ghost and physical regions but were
-    not caught by the per-bridge junction handlers. This covers two cases:
+    not caught by the per-bridge junction handlers. This covers three cases:
 
     1. Cross-bridge: both terminal atoms are ghost and both middle atoms
        are physical. This arises when two ghost groups have adjacent bridge
@@ -1990,6 +2005,22 @@ def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=Fals
             R3          R4
 
        Removed dihedrals: e.g. R1-X1-DR-X2, X1-DR-X2-R2
+
+    3. Bridge extension: one terminal is a physical bridge atom and the
+       remaining three atoms are ghost. This arises when the ghost group
+       contains a ring (e.g. cyclopropyl): the ring creates additional
+       bond paths so that dihedrals of the form X-DR1-DR2-DR3 reach from
+       the bridge into the ring interior. The per-bridge handlers only
+       remove dihedrals where the ghost terminal is the directly-bonded
+       ghost neighbour of the bridge; deeper ring atoms are missed.
+
+            DR2---DR3
+           /         \
+          X---DR1     DR4
+               \
+                DR5
+
+       Removed dihedrals: e.g. X-DR1-DR2-DR3, DR3-DR2-DR1-X
 
     Parameters
     ----------
@@ -2060,9 +2091,26 @@ def _remove_residual_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=Fals
             and (idx1 in ghosts or idx2 in ghosts)
         )
 
-        if cross_bridge or ghost_middle:
+        # Case 3: One terminal physical (bridge), three atoms ghost
+        # (bridge-into-ring extension). The per-bridge handlers only match
+        # the directly-bonded ghost neighbour as the ghost terminal, so
+        # dihedrals that continue into a ghost ring are missed.
+        bridge_extension = (
+            idx0 not in ghosts and idx1 in ghosts and idx2 in ghosts and idx3 in ghosts
+        ) or (
+            idx0 in ghosts and idx1 in ghosts and idx2 in ghosts and idx3 not in ghosts
+        )
+
+        if cross_bridge or ghost_middle or bridge_extension:
+            case = (
+                "cross-bridge"
+                if cross_bridge
+                else "ghost-middle"
+                if ghost_middle
+                else "bridge-extension"
+            )
             _logger.debug(
-                f"  Removing residual ghost dihedral: "
+                f"  Removing residual ghost dihedral ({case}): "
                 f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
                 f"{p.function()}"
             )
@@ -2396,8 +2444,93 @@ def _remove_ghost_centre_angles(
     return mol
 
 
+def _ghost_adjacency(ghosts, connectivity):
+    """Build an adjacency dict for the ghost-atom subgraph, keyed by integer atom index.
+
+    Using integer indices avoids any AtomIdx Python-wrapper hashing
+    inconsistencies when looking up atoms returned by connections_to().
+    """
+    ghost_indices = {g.value() for g in ghosts}
+    adj = {i: [] for i in ghost_indices}
+    for g in ghosts:
+        i = g.value()
+        for c in connectivity.connections_to(g):
+            j = c.value()
+            if j in ghost_indices:
+                adj[i].append(j)
+    return adj
+
+
+def _ghost_in_cycle(atom_idx, adj):
+    """
+    Return True if ``atom_idx`` lies on a cycle in the ghost subgraph described
+    by ``adj`` (an integer-keyed adjacency dict).
+
+    Removes the atom from the graph and does a BFS from each neighbour in turn.
+    If any neighbour can reach another neighbour of the atom without passing
+    through the atom itself, they lie on a cycle together.
+
+    We must try each neighbour as a start rather than only ``neighbors[0]``
+    because pendant neighbours (bonded only to ``atom_idx`` within the ghost
+    subgraph) cannot reach the cycle members — e.g. a methyl substituent on a
+    cyclopropyl carbon would cause a false-negative if picked first.
+    """
+    neighbors = adj.get(atom_idx, [])
+    if len(neighbors) < 2:
+        return False
+
+    for start in neighbors:
+        visited = {start}
+        queue = [start]
+        while queue:
+            node = queue.pop(0)
+            for n in adj.get(node, []):
+                if n != atom_idx and n not in visited:
+                    visited.add(n)
+                    queue.append(n)
+        if any(n in visited for n in neighbors if n != start):
+            return True
+
+    return False
+
+
+def _ring_constrained_ghosts(bridges, ghosts, connectivity):
+    """
+    Return the set of immediate ghost atoms (directly bonded to a bridge)
+    that lie on a cycle within the ghost subgraph.
+
+    For these atoms the ring topology already constrains their orientation
+    relative to the bridge, making anchor dihedrals through them redundant.
+    The ring bonds prevent free rotation around the bridge-ghost bond just as
+    well as an anchor dihedral would, so zeroing the anchor introduces no
+    flapping risk while removing a potential free-energy bias.
+
+    Pass the connectivity of the end state where the ghost atoms are real,
+    since that is where their ring bonds exist: connectivity1 for appearing
+    ghosts (ghost at lambda=0), connectivity0 for disappearing ghosts
+    (ghost at lambda=1).
+    """
+    if not ghosts:
+        return set()
+
+    adj = _ghost_adjacency(ghosts, connectivity)
+    ring_ghosts = set()
+    for ghost_list in bridges.values():
+        for g in ghost_list:
+            if _ghost_in_cycle(g.value(), adj):
+                ring_ghosts.add(g.value())
+
+    if ring_ghosts:
+        _logger.debug(
+            f"Ring-constrained immediate ghosts (anchors will be zeroed): "
+            f"[{', '.join(str(i) for i in sorted(ring_ghosts))}]"
+        )
+
+    return ring_ghosts
+
+
 def _soften_mixed_dihedrals(
-    mol, ghosts, modifications, soften_anchors=1.0, is_lambda1=False
+    mol, ghosts, modifications, soften_anchors=1.0, ring_ghosts=None, is_lambda1=False
 ):
     r"""
     Soften surviving mixed ghost/physical dihedral terms by scaling their
@@ -2410,9 +2543,15 @@ def _soften_mixed_dihedrals(
     atoms start gaining softcore nonbonded interactions but are constrained
     too tightly by bonded terms.
 
-    When ``soften_anchors`` is 1.0 (default), no modifications are made.
-    When 0.0, all mixed dihedrals are removed. Intermediate values scale
-    the force constants.
+    When ``soften_anchors`` is 1.0 (default) and ``ring_ghosts`` is empty,
+    no modifications are made.  When ``soften_anchors`` is 0.0, all mixed
+    dihedrals are removed.  Intermediate values scale the force constants.
+
+    Anchor dihedrals whose bridge-adjacent ghost atom lies on a ring within
+    the ghost subgraph (supplied via ``ring_ghosts``) are always zeroed,
+    regardless of ``soften_anchors``: the ring topology already constrains
+    the ghost orientation, so the anchor is redundant and may introduce a
+    free-energy bias.
 
     Parameters
     ----------
@@ -2429,6 +2568,12 @@ def _soften_mixed_dihedrals(
     soften_anchors : float, optional
         Scale factor for mixed dihedral force constants (0.0 to 1.0).
 
+    ring_ghosts : set of int, optional
+        Integer atom indices of ghost atoms that are both directly bonded to a
+        bridge and part of a ring in the ghost subgraph.  Any surviving mixed
+        dihedral whose bridge-adjacent ghost atom is in this set is removed
+        regardless of ``soften_anchors``.
+
     is_lambda1 : bool, optional
         Whether to modify dihedrals at lambda = 1.
 
@@ -2439,8 +2584,12 @@ def _soften_mixed_dihedrals(
         The updated molecule.
     """
 
-    # Nothing to do if there are no ghost atoms or no softening is requested.
-    if not ghosts or soften_anchors >= 1.0:
+    if ring_ghosts is None:
+        ring_ghosts = set()
+
+    # Nothing to do if there are no ghost atoms, no softening is requested,
+    # and no ring-constrained ghosts require automatic zeroing.
+    if not ghosts or (soften_anchors >= 1.0 and not ring_ghosts):
         return mol
 
     # Store the molecular info.
@@ -2476,12 +2625,31 @@ def _soften_mixed_dihedrals(
 
         if has_ghost and has_physical:
             dih_idx_str = ",".join(str(a.value()) for a in atoms)
-            if soften_anchors > 0.0:
-                scaled = p.function() * soften_anchors
+
+            # Determine the effective scale for this dihedral.  If the
+            # bridge-adjacent ghost (the ghost atom bonded to a physical atom
+            # within the four-atom sequence) lies on a ring in the ghost
+            # subgraph, zero it unconditionally: the ring constrains the ghost
+            # orientation and the anchor is redundant.
+            effective_scale = soften_anchors
+            if ring_ghosts:
+                for i, a in enumerate(atoms):
+                    if a.value() in ring_ghosts:
+                        neighbors_in_dih = []
+                        if i > 0:
+                            neighbors_in_dih.append(atoms[i - 1])
+                        if i < 3:
+                            neighbors_in_dih.append(atoms[i + 1])
+                        if any(n not in ghosts for n in neighbors_in_dih):
+                            effective_scale = 0.0
+                            break
+
+            if effective_scale > 0.0:
+                scaled = p.function() * effective_scale
                 new_dihedrals.set(idx0, idx1, idx2, idx3, scaled)
                 _logger.debug(
                     f"  Softening mixed dihedral: [{dih_idx_str}], "
-                    f"scale={soften_anchors}"
+                    f"scale={effective_scale}"
                 )
                 modifications[mod_key]["softened_dihedrals"].append(dih_idx_str)
             else:
