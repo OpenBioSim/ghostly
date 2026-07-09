@@ -323,12 +323,10 @@ def test_ejm49_to_ejm31():
     # The number of angles should remain the same at lambda = 1.
     assert angles1.num_functions() == new_angles1.num_functions()
 
-    # The number of dihedrals should be ten fewer at lambda = 1: four caught
-    # by the triple junction handler, four bridge-extension terms
-    # (17-20-{21,25}-{22,24,34,38}), plus two anchor dihedrals
-    # (16-17-20-{21,25}) that are auto-zeroed because atom 20 (the immediate
-    # ghost) lies on a ring within the ghost subgraph.
-    assert dihedrals1.num_functions() - 10 == new_dihedrals1.num_functions()
+    # The number of dihedrals should be eight fewer at lambda = 1: four caught
+    # by the triple junction handler, plus four bridge-extension terms
+    # (17-20-{21,25}-{22,24,34,38}).
+    assert dihedrals1.num_functions() - 8 == new_dihedrals1.num_functions()
 
     # The number of impropers should be six fewer at lambda = 1.
     assert improper1.num_functions() - 6 == new_improper1.num_functions()
@@ -371,9 +369,6 @@ def test_ejm49_to_ejm31():
         (AtomIdx(17), AtomIdx(20), AtomIdx(21), AtomIdx(34)),
         (AtomIdx(17), AtomIdx(20), AtomIdx(25), AtomIdx(24)),
         (AtomIdx(17), AtomIdx(20), AtomIdx(25), AtomIdx(38)),
-        # Anchor dihedrals auto-zeroed: atom 20 is ring-constrained.
-        (AtomIdx(16), AtomIdx(17), AtomIdx(20), AtomIdx(21)),
-        (AtomIdx(16), AtomIdx(17), AtomIdx(20), AtomIdx(25)),
     ]
 
     # Check that the missing dihedrals are in the original dihedrals at lambda = 1.
@@ -387,6 +382,16 @@ def test_ejm49_to_ejm31():
         check_dihedral(info, new_dihedrals1.potentials(), *dihedral)
         for dihedral in missing_dihedrals1
     )
+
+    # The anchor dihedrals (16-17-20-{21,25}) must survive: they are
+    # real-real-ghost-ghost and are kept to prevent flapping, even though
+    # atom 20 lies on a ring within the ghost subgraph.
+    anchor1 = [
+        (AtomIdx(16), AtomIdx(17), AtomIdx(20), AtomIdx(21)),
+        (AtomIdx(16), AtomIdx(17), AtomIdx(20), AtomIdx(25)),
+    ]
+
+    assert all(check_dihedral(info, new_dihedrals1.potentials(), *d) for d in anchor1)
 
     # Bridge atom 17 is sp2 and not in a ring. With stiffen_sp2_bridges=False
     # (the default), stiffening is skipped to avoid ~30° strain. Check that
@@ -512,10 +517,8 @@ def test_ejm31_to_jmc28():
 
     # At lambda = 0, the cyclopropyl group (atoms 32-42) is appearing (ghost).
     # The per-bridge handlers remove five dihedrals; the bridge-extension pass
-    # removes six more (17-32-33-{34,35,38} and 17-32-34-{33,36,37}); and the
-    # three anchor dihedrals (16-17-32-{33,34,42}) are auto-zeroed because
-    # atom 32 lies on a ring in the ghost subgraph.
-    assert dihedrals0.num_functions() - 14 == new_dihedrals0.num_functions()
+    # removes six more (17-32-33-{34,35,38} and 17-32-34-{33,36,37}).
+    assert dihedrals0.num_functions() - 11 == new_dihedrals0.num_functions()
 
     # These six bridge-extension dihedrals should be absent after modification.
     bridge_extension0 = [
@@ -537,17 +540,19 @@ def test_ejm31_to_jmc28():
         check_dihedral(info, new_dihedrals0.potentials(), *d) for d in bridge_extension0
     )
 
-    # The anchor dihedrals (16-17-32-{33,34,42}) should also be absent: atom 32
-    # is ring-constrained so the ring topology already prevents flapping.
+    # The anchor dihedrals (16-17-32-{33,34,42}) must survive: they are
+    # real-real-ghost-ghost and are intentionally kept to prevent flapping,
+    # even though atom 32 lies on a ring (the cyclopropyl) in the ghost
+    # subgraph. A single-bond attachment to the bridge leaves one rotational
+    # degree of freedom (rigid rotation of the ring about the bridge-ghost
+    # bond) that the ring's internal bonds do not constrain.
     anchor0 = [
         (AtomIdx(16), AtomIdx(17), AtomIdx(32), AtomIdx(33)),
         (AtomIdx(16), AtomIdx(17), AtomIdx(32), AtomIdx(34)),
         (AtomIdx(16), AtomIdx(17), AtomIdx(32), AtomIdx(42)),
     ]
 
-    assert not any(
-        check_dihedral(info, new_dihedrals0.potentials(), *d) for d in anchor0
-    )
+    assert all(check_dihedral(info, new_dihedrals0.potentials(), *d) for d in anchor0)
 
     # At lambda = 1, the single-carbon group (atom 19) is disappearing (ghost).
     # The per-bridge handlers remove five dihedrals; no bridge-extension terms

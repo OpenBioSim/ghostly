@@ -5,6 +5,7 @@ Changelog
 -------------------------------------------------------------------------------------
 
 * Please add an item to this CHANGELOG for any new features or bug fixes when creating a PR.
+* Revert auto-zeroing of anchor dihedrals for ring-constrained immediate ghosts: a singly-attached ring still has one unconstrained rotational degree of freedom about the bridge-ghost bond, so removing the anchor reintroduces flapping risk.
 
 [2026.1.0](https://github.com/openbiosim/ghostly/compare/2025.2.0...2026.1.0) - Jun 2026
 -------------------------------------------------------------------------------------
