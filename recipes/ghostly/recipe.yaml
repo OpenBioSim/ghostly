@@ -31,6 +31,10 @@ tests:
   - python:
       imports:
         - ghostly
+      # AmberTools can be pulled in transitively, and installs tools into
+      # site-packages whose metadata still pins numpy <2, so 'pip check'
+      # fails even though nothing here uses them.
+      pip_check: false
   - script:
       - pytest -vvv --color=yes --import-mode=importlib ./tests
     files:
