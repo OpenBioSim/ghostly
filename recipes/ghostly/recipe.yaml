@@ -21,9 +21,9 @@ requirements:
     - versioningit
   run:
     # main
-    - biosimspace >=2026.1.0,<2026.2.0
+    - biosimspace >=2026.2.0,<2026.3.0
     # devel
-    #- biosimspace ==2026.2.0.dev
+    #- biosimspace ==2026.3.0.dev
     - loguru
     - python
 
@@ -31,6 +31,10 @@ tests:
   - python:
       imports:
         - ghostly
+      # AmberTools can be pulled in transitively, and installs tools into
+      # site-packages whose metadata still pins numpy <2, so 'pip check'
+      # fails even though nothing here uses them.
+      pip_check: false
   - script:
       - pytest -vvv --color=yes --import-mode=importlib ./tests
     files:

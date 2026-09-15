@@ -2584,14 +2584,6 @@ def _check_rotamer_anchors(
 
     which has a single minimum at phi = 0 (trans) and a barrier of 2k.
 
-    .. note::
-
-        Stiffening is not currently enabled. When wiring in, add
-        ``stiffen_rotamers`` and ``k_rotamer`` parameters to ``modify()``
-        and expose them through the CLI. The ``modifications`` dict will
-        also need a ``"stiffened_dihedrals"`` key initialised to an empty
-        list for each end state.
-
     Parameters
     ----------
 

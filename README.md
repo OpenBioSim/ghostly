@@ -161,7 +161,7 @@ ghostly --system system.bss --log-level debug
 When finished, the program will output a [BioSimSpace](https://biosimspace.openbiosim.org)
 stream file for the perturbable molecule, or AMBER or GROMACS files for the two end states.
 The format can be specified using the the `--output-format` option. If you require input
-for a free-energy perturbation simulation, e.g. a hybrid GROMACS toplogy file, the you can
+for a free-energy perturbation simulation, e.g. a hybrid GROMACS topology file, then you can
 use the stream file with [BioSimSpace](https://biosimspace.openbiosim.org) to generate the
 required input files. Additionally, the program will output a JSON file summarising the
 modifications that were made.
