@@ -1,21 +1,20 @@
 Changelog
 =========
 
-[2026.2.0](https://github.com/openbiosim/ghostly/compare/2026.1.0...2026.2.0) - ********
--------------------------------------------------------------------------------------
+[2026.2.0](https://github.com/openbiosim/ghostly/compare/2026.1.0...2026.2.0) - Sep 2026
+----------------------------------------------------------------------------------------
 
-* Please add an item to this CHANGELOG for any new features or bug fixes when creating a PR.
 * Revert auto-zeroing of anchor dihedrals for ring-constrained immediate ghosts: a singly-attached ring still has one unconstrained rotational degree of freedom about the bridge-ghost bond, so removing the anchor reintroduces flapping risk.
 
 [2026.1.0](https://github.com/openbiosim/ghostly/compare/2025.2.0...2026.1.0) - Jun 2026
--------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------
 
 * Add linear spacer modification for ring-breaking ghost bridges.
 * Fixed missing removal of bridge-extension dihedrals (`real–ghost–ghost–ghost`) that arise when a ghost group contains a ring, e.g. cyclopropyl, where the ring topology creates spurious torsional coupling between the real scaffold and the ghost ring interior.
 * Auto-zero anchor dihedrals when the immediate ghost atom lies on a ring within the ghost subgraph. The ring topology already constrains the ghost orientation relative to the bridge, making the anchor redundant.
 
 [2025.2.0](https://github.com/openbiosim/ghostly/compare/2025.1.0...2025.2.0) - Mar 2026
--------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------
 
 * Ensure that there are independent, per-state, physical neighbours. This removes the spurious cross-state ghost filter that resulted in a downgrading of junction types when multiple junctions were present in the molecule.
 * Added a fallback for failed angle optimisation to ensure that the original equilibrium value is preserved when convergence fails.
@@ -29,6 +28,6 @@ Changelog
 * Changed the default for ``--optimise-angles`` to ``False``. Angle optimisation is conformer-dependent: different input geometries can yield different equilibrium angles for the same perturbation, adding variability to the resulting force field. The original force field theta0 is sufficient given the small ``k_soft`` value. Optimisation can still be enabled explicitly to follow Boresch et al. (JCTC 2021) strictly.
 
 [2025.1.0](https://github.com/OpenBioSim/ghostly/releases/tag/2025.1.0) - Nov 2025
--------------------------------------------------------------------------------
+----------------------------------------------------------------------------------
 
 * Initial public release.
