@@ -560,6 +560,98 @@ def test_ejm31_to_jmc28():
     assert dihedrals1.num_functions() - 5 == new_dihedrals1.num_functions()
 
 
+def test_pfkfb3_48_to_47():
+    """
+    Test ghost atom modifications for the PFKFB3 ligands 48 to 47 (methoxy to
+    ethyl). This has a dual junction with two ghost branches at lambda = 0:
+    ghost hydrogens 47 and 48 on the ether oxygen (atom 27), whose physical
+    neighbours are atoms 13 and 28.
+
+    Stiffening the physical-bridge-ghost angles to 90 degrees confines each
+    ghost to the normal of the physical plane. The intraghost angle must be
+    stiffened to 180 degrees so that the two ghosts sit on opposite sides of
+    that plane, otherwise the same-side arrangement is degenerate at lambda = 0
+    and cannot escape once the intraghost angle grows in. The input geometry
+    has both ghosts on the same side of the plane.
+    """
+
+    import numpy as np
+    from sire.legacy.Mol import AtomIdx
+
+    mols = sr.load_test_files("pfkfb3_48_47.s3")
+
+    angles0 = mols[0].property("angle0")
+
+    k_hard = 100
+
+    new_mols, modifications = modify(mols, k_hard=k_hard)
+
+    new_angles0 = new_mols[0].property("angle0")
+
+    info = mols[0].info()
+
+    # No angles should be removed.
+    assert angles0.num_functions() == new_angles0.num_functions()
+    assert modifications["lambda_0"]["removed_angles"] == []
+
+    # The four physical-bridge-ghost angles are stiffened to 90 degrees and the
+    # intraghost angle to 180 degrees.
+    expected = {
+        (AtomIdx(13), AtomIdx(27), AtomIdx(47)): f"{k_hard} [theta - 1.5708]^2",
+        (AtomIdx(13), AtomIdx(27), AtomIdx(48)): f"{k_hard} [theta - 1.5708]^2",
+        (AtomIdx(28), AtomIdx(27), AtomIdx(47)): f"{k_hard} [theta - 1.5708]^2",
+        (AtomIdx(28), AtomIdx(27), AtomIdx(48)): f"{k_hard} [theta - 1.5708]^2",
+        (AtomIdx(47), AtomIdx(27), AtomIdx(48)): f"{k_hard} [theta - 3.14159]^2",
+    }
+
+    found = {}
+    for p in new_angles0.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        if (idx0, idx1, idx2) in expected:
+            found[(idx0, idx1, idx2)] = str(p.function())
+        elif (idx2, idx1, idx0) in expected:
+            found[(idx2, idx1, idx0)] = str(p.function())
+
+    assert found == expected
+
+    assert modifications["lambda_0"]["stiffened_angles"]["47,27,48"] == {
+        "k": k_hard,
+        "theta0": 180.0,
+    }
+
+    # Minimising at lambda = 0 must move the ghosts to opposite sides of the
+    # physical plane.
+    def ghost_sides(mol):
+        coords = mol.property("coordinates")
+
+        def pos(i):
+            c = coords[i]
+            return np.array([c.x().value(), c.y().value(), c.z().value()])
+
+        bridge = pos(27)
+        normal = np.cross(pos(13) - bridge, pos(28) - bridge)
+        return (
+            np.sign((pos(47) - bridge) @ normal),
+            np.sign((pos(48) - bridge) @ normal),
+        )
+
+    new_mols = sr.morph.link_to_reference(new_mols)
+
+    s0, s1 = ghost_sides(new_mols[0])
+    assert s0 == s1
+
+    minimised = (
+        new_mols.minimisation(lambda_value=0.0, platform="CPU", cutoff_type="rf")
+        .run()
+        .commit()
+    )
+
+    s0, s1 = ghost_sides(minimised[0])
+    assert s0 == -s1
+
+
 def check_angle(info, potentials, idx0, idx1, idx2):
     """
     Check if an angle potential is in a list of potentials.

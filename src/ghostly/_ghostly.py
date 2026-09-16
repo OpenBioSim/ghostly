@@ -1128,12 +1128,29 @@ def _dual(
                         f"not stiffening."
                     )
                     continue
+
+                # Stiffening confines each ghost to the normal of the physical
+                # plane, so set the intraghost angle to 180 degrees to keep the
+                # branches on opposite sides. Removing it would leave the
+                # same-side arrangement degenerate at this end state, with a
+                # large barrier to escape.
+                from math import pi
+                from sire.legacy.CAS import Symbol
+
+                expression = _SireMM.AmberAngle(k_hard, pi).to_expression(
+                    Symbol("theta")
+                )
+                new_angles.set(idx0, idx1, idx2, expression)
                 _logger.debug(
-                    f"  Removing angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
+                    f"  Stiffening intraghost angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                    f"{p.function()} --> {expression}"
                 )
                 ang_idx = (idx0.value(), idx1.value(), idx2.value())
                 ang_idx = ",".join([str(i) for i in ang_idx])
-                modifications[mod_key]["removed_angles"].append(ang_idx)
+                modifications[mod_key]["stiffened_angles"][ang_idx] = {
+                    "k": k_hard,
+                    "theta0": 180.0,
+                }
             else:
                 new_angles.set(idx0, idx1, idx2, p.function())
 
