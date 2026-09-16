@@ -595,13 +595,19 @@ def test_pfkfb3_48_to_47():
     assert modifications["lambda_0"]["removed_angles"] == []
 
     # The four physical-bridge-ghost angles are stiffened to 90 degrees and the
-    # intraghost angle to 180 degrees.
+    # intraghost angle to 180 degrees with a quarter of the force constant.
+    k_intraghost = 0.25 * k_hard
+
     expected = {
         (AtomIdx(13), AtomIdx(27), AtomIdx(47)): f"{k_hard} [theta - 1.5708]^2",
         (AtomIdx(13), AtomIdx(27), AtomIdx(48)): f"{k_hard} [theta - 1.5708]^2",
         (AtomIdx(28), AtomIdx(27), AtomIdx(47)): f"{k_hard} [theta - 1.5708]^2",
         (AtomIdx(28), AtomIdx(27), AtomIdx(48)): f"{k_hard} [theta - 1.5708]^2",
-        (AtomIdx(47), AtomIdx(27), AtomIdx(48)): f"{k_hard} [theta - 3.14159]^2",
+        (
+            AtomIdx(47),
+            AtomIdx(27),
+            AtomIdx(48),
+        ): f"{k_intraghost:g} [theta - 3.14159]^2",
     }
 
     found = {}
@@ -617,7 +623,7 @@ def test_pfkfb3_48_to_47():
     assert found == expected
 
     assert modifications["lambda_0"]["stiffened_angles"]["47,27,48"] == {
-        "k": k_hard,
+        "k": k_intraghost,
         "theta0": 180.0,
     }
 
@@ -650,6 +656,65 @@ def test_pfkfb3_48_to_47():
 
     s0, s1 = ghost_sides(minimised[0])
     assert s0 == -s1
+
+
+def test_pfkfb3_48_to_47_skipped_neighbour():
+    """
+    Test that the intraghost angle is preserved, not stiffened to 180
+    degrees, when stiffening is skipped through a poorly-scoring physical
+    neighbour of the bridge. Atom 28 is made transmuting so that it scores
+    worse than atom 13. The ghosts then no longer sit on the normal of the
+    physical plane, so a 180 degree intraghost angle would be frustrated.
+    """
+
+    from sire.legacy.Mol import AtomIdx, Element
+
+    mols = sr.load_test_files("pfkfb3_48_47.s3")
+
+    mol = mols[0].edit().atom(28).set_property("element1", Element("N")).molecule()
+    mols.update(mol.commit())
+
+    angles0 = mols[0].property("angle0")
+
+    k_hard = 100
+
+    new_mols, modifications = modify(mols, k_hard=k_hard)
+
+    new_angles0 = new_mols[0].property("angle0")
+
+    info = mols[0].info()
+
+    assert angles0.num_functions() == new_angles0.num_functions()
+    assert modifications["lambda_0"]["removed_angles"] == []
+    assert set(modifications["lambda_0"]["stiffened_angles"]) == {
+        "13,27,47",
+        "13,27,48",
+    }
+
+    # Angles through atom 28 and the intraghost angle keep their original form.
+    original = {}
+    for p in angles0.potentials():
+        idx = (
+            info.atom_idx(p.atom0()),
+            info.atom_idx(p.atom1()),
+            info.atom_idx(p.atom2()),
+        )
+        original[idx] = str(p.function())
+
+    preserved = [
+        (AtomIdx(28), AtomIdx(27), AtomIdx(47)),
+        (AtomIdx(28), AtomIdx(27), AtomIdx(48)),
+        (AtomIdx(47), AtomIdx(27), AtomIdx(48)),
+    ]
+
+    for p in new_angles0.potentials():
+        idx = (
+            info.atom_idx(p.atom0()),
+            info.atom_idx(p.atom1()),
+            info.atom_idx(p.atom2()),
+        )
+        if idx in preserved or idx[::-1] in preserved:
+            assert str(p.function()) == original[idx]
 
 
 def check_angle(info, potentials, idx0, idx1, idx2):

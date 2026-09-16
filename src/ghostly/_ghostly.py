@@ -1106,6 +1106,20 @@ def _dual(
         new_angles = _SireMM.ThreeAtomFunctions(mol.info())
         new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
 
+        # The ghosts only sit on the normal of the physical plane if every
+        # physical-bridge-ghost angle is stiffened. The single-branch handler
+        # skips poorly-scoring physical atoms, so mirror that check here.
+        if bridge_in_ring and not stiffen_ring_bridges:
+            preserve_reason = "is in a ring"
+        elif bridge_is_sp2 and not stiffen_sp2_bridges:
+            preserve_reason = "is sp2"
+        elif phys_scores is not None and any(
+            phys_scores[p] > best_phys_score and (heavy_phys - {p}) for p in physical
+        ):
+            preserve_reason = "has a poorly-scoring physical neighbour"
+        else:
+            preserve_reason = None
+
         # Angles.
         for p in angles.potentials():
             idx0 = info.atom_idx(p.atom0())
@@ -1113,18 +1127,15 @@ def _dual(
             idx2 = info.atom_idx(p.atom2())
 
             if idx0 in ghosts and idx2 in ghosts:
-                # When stiffening is skipped for ring/sp2 bridges, the individual
-                # ghost angles are left at their original values, so the intraghost
-                # angle (e.g. H-bridge-H) should also be preserved.
-                if (bridge_in_ring and not stiffen_ring_bridges) or (
-                    bridge_is_sp2 and not stiffen_sp2_bridges
-                ):
+                # When stiffening is skipped, the individual ghost angles are
+                # left at their original values, so the intraghost angle
+                # (e.g. H-bridge-H) should also be preserved.
+                if preserve_reason is not None:
                     new_angles.set(idx0, idx1, idx2, p.function())
                     _logger.debug(
                         f"  Preserving intraghost angle "
                         f"[{idx0.value()}-{idx1.value()}-{idx2.value()}]: "
-                        f"bridge atom {bridge.value()} "
-                        f"{'is in a ring' if bridge_in_ring else 'is sp2'}, "
+                        f"bridge atom {bridge.value()} {preserve_reason}, "
                         f"not stiffening."
                     )
                     continue
@@ -1133,11 +1144,15 @@ def _dual(
                 # plane, so set the intraghost angle to 180 degrees to keep the
                 # branches on opposite sides. Removing it would leave the
                 # same-side arrangement degenerate at this end state, with a
-                # large barrier to escape.
+                # large barrier to escape. A quarter of k_hard is enough to
+                # remove that barrier without stiffening the bend mode of the
+                # light ghost atoms to the point of timestep instability.
                 from math import pi
                 from sire.legacy.CAS import Symbol
 
-                expression = _SireMM.AmberAngle(k_hard, pi).to_expression(
+                k_intraghost = 0.25 * k_hard
+
+                expression = _SireMM.AmberAngle(k_intraghost, pi).to_expression(
                     Symbol("theta")
                 )
                 new_angles.set(idx0, idx1, idx2, expression)
@@ -1148,7 +1163,7 @@ def _dual(
                 ang_idx = (idx0.value(), idx1.value(), idx2.value())
                 ang_idx = ",".join([str(i) for i in ang_idx])
                 modifications[mod_key]["stiffened_angles"][ang_idx] = {
-                    "k": k_hard,
+                    "k": k_intraghost,
                     "theta0": 180.0,
                 }
             else:
