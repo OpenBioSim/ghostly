@@ -717,6 +717,47 @@ def test_pfkfb3_48_to_47_skipped_neighbour():
             assert str(p.function()) == original[idx]
 
 
+def test_stiffen_rotamers_reference_geometry():
+    """
+    Test that stiffened rotamer anchor dihedrals have their minimum at the
+    geometry of the end state where the ghosts are physical. The three ghosts
+    on bridge 3 of hexane to propane are staggered at 60, 180 and 300 degrees
+    about the 2-3 bond.
+    """
+
+    import sire.morph as morph
+
+    mols = sr.load_test_files("hex2prp.s3")
+
+    new_mols, modifications = modify(mols, stiffen_rotamers=True, k_rotamer=50)
+
+    stiffened = modifications["lambda_1"]["stiffened_dihedrals"]
+    assert set(stiffened) == {"1,2,3,4", "1,2,3,13", "1,2,3,14"}
+
+    energies = dihedral_energies(new_mols[0], "dihedral1", morph.link_to_reference)
+    for dihedral in stiffened:
+        assert abs(energies[dihedral]) < 1e-6
+
+
+def dihedral_energies(mol, prop, link):
+    """
+    Return the energy of each dihedral in the given dihedral property,
+    evaluated at the coordinates of the linked end state.
+    """
+
+    dihedrals = mol.property(prop)
+    ref = link(mol).edit().set_property("dihedral", dihedrals).molecule().commit()
+    info = mol.info()
+
+    energies = {}
+    for p in dihedrals.potentials():
+        idx = [info.atom_idx(a) for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())]
+        key = ",".join(str(i.value()) for i in idx)
+        energies[key] = ref.dihedral(*idx).energy().value()
+
+    return energies
+
+
 def check_angle(info, potentials, idx0, idx1, idx2):
     """
     Check if an angle potential is in a list of potentials.

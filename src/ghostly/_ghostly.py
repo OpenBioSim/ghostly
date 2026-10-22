@@ -119,7 +119,9 @@ def modify(
         ring, sp3 bridge), surviving anchor dihedrals can allow rotameric
         transitions of ghost atoms at intermediate lambda. Enabling this
         replaces those dihedrals with a single cosine well of depth
-        ``2 * k_rotamer``. Default is False (only log warnings).
+        ``2 * k_rotamer``, with its minimum at the dihedral angle of the end
+        state where the ghosts are physical. Default is False (only log
+        warnings).
 
     k_rotamer : float, optional
         The force constant for the replacement cosine well when stiffening
@@ -2612,9 +2614,10 @@ def _check_rotamer_anchors(
     affected dihedrals (those spanning the rotatable bond with at least one
     ghost terminal) are replaced with a single n=1 cosine well:
 
-        V(phi) = k [1 + cos(phi - pi)]
+        V(phi) = k [1 + cos(phi - phi_ref + pi)]
 
-    which has a single minimum at phi = 0 (trans) and a barrier of 2k.
+    which has a single minimum at phi_ref, the dihedral angle measured in the
+    end state where the ghost is physical, and a barrier of 2k.
 
     Parameters
     ----------
@@ -2711,10 +2714,6 @@ def _check_rotamer_anchors(
 
     # Stiffen the anchor dihedrals spanning the rotatable bonds.
 
-    from math import pi
-
-    from sire.legacy.CAS import Symbol
-
     # Get the end state property suffix.
     if is_lambda1:
         mod_key = "lambda_1"
@@ -2729,11 +2728,8 @@ def _check_rotamer_anchors(
     # Get the end state dihedral functions.
     dihedrals = mol.property("dihedral" + suffix)
 
-    # Create the stiff single-well replacement: k[1 + cos(phi - pi)].
-    # Minimum at phi = 0 (trans), barrier height = 2k.
-    replacement = _SireMM.AmberDihedral(
-        _SireMM.AmberDihPart(k_rotamer, 1, pi)
-    ).to_expression(Symbol("phi"))
+    # The ghosts are physical at the opposite end state.
+    ref = _physical_state(mol, is_lambda1)
 
     # Initialise a container to store the updated dihedral functions.
     new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
@@ -2755,6 +2751,7 @@ def _check_rotamer_anchors(
         if has_ghost_terminal and (
             bond_pair in rotatable_bonds or bond_pair_rev in rotatable_bonds
         ):
+            replacement = _single_well(ref, (idx0, idx1, idx2, idx3), k_rotamer)
             _logger.debug(
                 f"  Stiffening rotamer anchor dihedral: "
                 f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
@@ -2777,6 +2774,34 @@ def _check_rotamer_anchors(
         )
 
     return mol
+
+
+def _physical_state(mol, is_lambda1=False):
+    """
+    Return the molecule linked to the end state where the ghost atoms of the
+    given end state are physical.
+    """
+    if is_lambda1:
+        return _morph.link_to_reference(mol)
+    else:
+        return _morph.link_to_perturbed(mol)
+
+
+def _single_well(ref, idxs, k):
+    """
+    Return a single-well n=1 cosine dihedral term, k[1 + cos(phi - phi_ref + pi)],
+    with its minimum at the dihedral angle phi_ref of the atoms ``idxs`` in the
+    reference molecule ``ref``.
+    """
+    from math import pi
+
+    from sire.legacy.CAS import Symbol
+
+    phi_ref = ref.dihedral(*idxs).size().to("radians")
+
+    return _SireMM.AmberDihedral(
+        _SireMM.AmberDihPart(k, 1, phi_ref - pi)
+    ).to_expression(Symbol("phi"))
 
 
 def _create_connectivity(mol):
