@@ -391,6 +391,9 @@ def run():
     if not k_single_well.has_same_units(u_energy):
         logger.error("k-single-well must have units of kcal/mol")
         sys.exit(1)
+    if k_single_well.value() <= 0:
+        logger.error("k-single-well must be positive")
+        sys.exit(1)
 
     # Try to merge the reference and perturbed molecules.
     if args.system is None:
