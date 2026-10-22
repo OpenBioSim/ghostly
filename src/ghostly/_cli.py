@@ -152,6 +152,31 @@ def run():
     )
 
     parser.add_argument(
+        "--single-well-anchors",
+        action=argparse.BooleanOptionalAction,
+        help="""
+             Whether to replace surviving anchor dihedrals (one ghost terminal
+             atom, three physical atoms) with a single-well cosine potential
+             whose minimum is the dihedral angle of the end state where the
+             ghost is physical. This prevents ghost atoms being trapped in an
+             alternative well of a multi-well dihedral at intermediate lambda.
+             """,
+        default=False,
+        required=False,
+    )
+
+    parser.add_argument(
+        "--k-single-well",
+        type=str,
+        help="""
+             The force constant for the single-well anchor dihedrals. The
+             resulting barrier height is 2 * k_single_well.
+             """,
+        default="5 kcal/mol",
+        required=False,
+    )
+
+    parser.add_argument(
         "--stiffen-rotamers",
         action=argparse.BooleanOptionalAction,
         help="""
@@ -356,6 +381,17 @@ def run():
         logger.error("k-rotamer must have units of kcal/mol")
         sys.exit(1)
 
+    # Try to parse the k-single-well value.
+    try:
+        k_single_well = sr.u(args.k_single_well)
+    except Exception as e:
+        logger.error(f"An error occurred while parsing the k-single-well value: {e}")
+        sys.exit(1)
+
+    if not k_single_well.has_same_units(u_energy):
+        logger.error("k-single-well must have units of kcal/mol")
+        sys.exit(1)
+
     # Try to merge the reference and perturbed molecules.
     if args.system is None:
         try:
@@ -380,6 +416,8 @@ def run():
             optimise_angles=args.optimise_angles,
             num_optimise=args.num_optimise,
             soften_anchors=args.soften_anchors,
+            single_well_anchors=args.single_well_anchors,
+            k_single_well=k_single_well.value(),
             stiffen_rotamers=args.stiffen_rotamers,
             k_rotamer=k_rotamer.value(),
             stiffen_ring_bridges=args.stiffen_ring_bridges,

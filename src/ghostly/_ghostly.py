@@ -52,6 +52,8 @@ def modify(
     optimise_angles=False,
     num_optimise=10,
     soften_anchors=1.0,
+    single_well_anchors=False,
+    k_single_well=5,
     stiffen_rotamers=False,
     k_rotamer=50,
     stiffen_ring_bridges=False,
@@ -112,6 +114,22 @@ def modify(
         at small lambda for complex perturbations where ghost groups are
         constrained too tightly, particularly when multiple ghost groups
         share hub atoms.
+
+    single_well_anchors : bool, optional
+        Whether to replace each surviving anchor dihedral, i.e. one with a
+        single ghost terminal atom and three physical atoms, with a single-well
+        n=1 cosine potential whose minimum is the dihedral angle of the end
+        state where the ghost is physical. Multi-well anchor dihedrals can trap
+        ghost atoms in an alternative well at intermediate lambda, which
+        appears as hysteresis between independently equilibrated windows.
+        Applied to all junction types, after ``soften_anchors`` and before
+        ``stiffen_rotamers``, which overrides it on rotatable bonds. Default
+        is False.
+
+    k_single_well : float, optional
+        The force constant for the single-well anchor dihedrals (in kcal/mol).
+        The resulting barrier height is ``2 * k_single_well``. Only used when
+        ``single_well_anchors`` is True.
 
     stiffen_rotamers : bool, optional
         Whether to replace rotamer anchor dihedrals with a stiff single-well
@@ -200,6 +218,7 @@ def modify(
         "softened_angles": {},
         "softened_dihedrals": [],
         "stiffened_dihedrals": [],
+        "single_well_dihedrals": [],
         "linearised_ring_break": [],
         "softened_bonds": {},
     }
@@ -210,6 +229,7 @@ def modify(
         "softened_angles": {},
         "softened_dihedrals": [],
         "stiffened_dihedrals": [],
+        "single_well_dihedrals": [],
         "linearised_ring_break": [],
         "softened_bonds": {},
     }
@@ -440,6 +460,16 @@ def modify(
             is_lambda1=False,
         )
 
+        # Optionally replace anchor dihedrals with single-well potentials.
+        if single_well_anchors:
+            mol = _single_well_anchors(
+                mol,
+                ghosts0,
+                modifications,
+                k_single_well=k_single_well,
+                is_lambda1=False,
+            )
+
         # Check for potential rotamer anchor dihedrals.
         mol = _check_rotamer_anchors(
             mol,
@@ -553,6 +583,16 @@ def modify(
             soften_anchors=soften_anchors,
             is_lambda1=True,
         )
+
+        # Optionally replace anchor dihedrals with single-well potentials.
+        if single_well_anchors:
+            mol = _single_well_anchors(
+                mol,
+                ghosts1,
+                modifications,
+                k_single_well=k_single_well,
+                is_lambda1=True,
+            )
 
         # Check for potential rotamer anchor dihedrals.
         mol = _check_rotamer_anchors(
@@ -2577,6 +2617,108 @@ def _soften_mixed_dihedrals(
             )
         else:
             _logger.debug(f"Removed all mixed ghost/physical dihedrals at {lam}")
+
+    # Return the updated molecule.
+    return mol
+
+
+def _single_well_anchors(mol, ghosts, modifications, k_single_well=5, is_lambda1=False):
+    r"""
+    Replace surviving anchor dihedrals with single-well n=1 cosine terms.
+
+    An anchor dihedral has a single ghost terminal atom and three physical
+    atoms, e.g. P2-P1-X-DR1, where X is the bridge atom. Each is replaced with:
+
+        V(phi) = k [1 + cos(phi - phi_ref + pi)]
+
+    where phi_ref is the dihedral angle measured in the end state where the
+    ghost is physical. The functional form of the anchor does not affect the
+    factorisation of the ghost partition function, so the free energy
+    contribution still cancels between legs.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the current end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    k_single_well : float, optional
+        The force constant for the single-well terms. (In kcal/mol)
+
+    is_lambda1 : bool, optional
+        Whether to modify dihedrals at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
+
+    # Store the molecular info.
+    info = mol.info()
+
+    # Get the end state property.
+    if is_lambda1:
+        mod_key = "lambda_1"
+        suffix = "1"
+    else:
+        mod_key = "lambda_0"
+        suffix = "0"
+
+    # Get the end state dihedral functions.
+    dihedrals = mol.property("dihedral" + suffix)
+
+    # The ghosts are physical at the opposite end state.
+    ref = _physical_state(mol, is_lambda1)
+
+    # Initialise a container to store the updated dihedral functions.
+    new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+
+    # Track whether any modifications were made.
+    modified = False
+
+    # Loop over the dihedral potentials.
+    for p in dihedrals.potentials():
+        idx0 = info.atom_idx(p.atom0())
+        idx1 = info.atom_idx(p.atom1())
+        idx2 = info.atom_idx(p.atom2())
+        idx3 = info.atom_idx(p.atom3())
+
+        atoms = (idx0, idx1, idx2, idx3)
+        is_ghost = [a in ghosts for a in atoms]
+
+        if sum(is_ghost) == 1 and (is_ghost[0] or is_ghost[3]):
+            replacement = _single_well(ref, atoms, k_single_well)
+            dih_idx_str = ",".join(str(a.value()) for a in atoms)
+            _logger.debug(
+                f"  Single-well anchor dihedral: [{dih_idx_str}], "
+                f"{p.function()} --> {replacement}"
+            )
+            new_dihedrals.set(idx0, idx1, idx2, idx3, replacement)
+            modifications[mod_key]["single_well_dihedrals"].append(dih_idx_str)
+            modified = True
+        else:
+            new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+    # Set the updated dihedrals.
+    if modified:
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
 
     # Return the updated molecule.
     return mol

@@ -739,6 +739,70 @@ def test_stiffen_rotamers_reference_geometry():
         assert abs(energies[dihedral]) < 1e-6
 
 
+def test_single_well_anchors():
+    """
+    Test that anchor dihedrals are replaced with single-well terms whose
+    minimum is the geometry of the end state where the ghosts are physical.
+    The three ghosts on bridge 3 of hexane to propane are staggered at 60,
+    180 and 300 degrees about the 2-3 bond.
+    """
+
+    import sire.morph as morph
+
+    mols = sr.load_test_files("hex2prp.s3")
+
+    default_mols, default = modify(mols)
+    new_mols, modifications = modify(mols, single_well_anchors=True)
+
+    # Only the functional form changes, not which dihedrals survive.
+    assert (
+        new_mols[0].property("dihedral1").num_functions()
+        == default_mols[0].property("dihedral1").num_functions()
+    )
+    removed = modifications["lambda_1"]["removed_dihedrals"]
+    assert removed == default["lambda_1"]["removed_dihedrals"]
+
+    single_well = modifications["lambda_1"]["single_well_dihedrals"]
+    assert set(single_well) == {"1,2,3,4", "1,2,3,13", "1,2,3,14"}
+    assert modifications["lambda_0"]["single_well_dihedrals"] == []
+
+    energies = dihedral_energies(new_mols[0], "dihedral1", morph.link_to_reference)
+    for dihedral in single_well:
+        assert abs(energies[dihedral]) < 1e-6
+
+
+def test_fac4c_to_edo_single_well():
+    """
+    Test the single-well anchor for the ring-breaking perturbation FAC 4c to
+    EDO. At lambda = 1, carbon 36 becomes a carbonyl oxygen with ghost 67
+    attached, a terminal junction anchored through 10-12-36-67. The default
+    n=2 anchor has wells at both cis and trans, so the ghost can be trapped
+    trans at intermediate lambda. The single well keeps only cis.
+    """
+
+    import sire.morph as morph
+
+    mols = sr.load_test_files("fac4c_edo.s3")
+
+    new_mols, modifications = modify(mols, single_well_anchors=True, k_single_well=5)
+
+    assert modifications["lambda_0"]["single_well_dihedrals"] == []
+    assert modifications["lambda_1"]["single_well_dihedrals"] == ["10,12,36,67"]
+    assert modifications["lambda_1"]["removed_dihedrals"] == ["13,12,36,67"]
+
+    energies = dihedral_energies(new_mols[0], "dihedral1", morph.link_to_reference)
+    assert abs(energies["10,12,36,67"]) < 1e-6
+
+    # Rotating the ghost to trans gives the full barrier of 2k.
+    mol = morph.link_to_reference(new_mols[0])
+    cursor = mol.cursor()
+    cursor.dihedral("atomidx 10", "atomidx 12", "atomidx 36", "atomidx 67").change_size(
+        180 * sr.units.degrees, move_all=False
+    )
+    trans = dihedral_energies(cursor.commit(), "dihedral1", lambda m: m)
+    assert abs(trans["10,12,36,67"] - 10) < 1e-3
+
+
 def dihedral_energies(mol, prop, link):
     """
     Return the energy of each dihedral in the given dihedral property,
