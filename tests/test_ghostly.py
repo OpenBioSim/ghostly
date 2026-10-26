@@ -836,6 +836,30 @@ def test_soften_anchors():
     assert not anchors & set(remaining)
 
 
+def test_modified_flag():
+    """
+    Test that modified molecules record the options used, and that they can
+    only be modified again when forced.
+    """
+
+    import json
+
+    import pytest
+
+    mols = sr.load_test_files("hex2prp.s3")
+
+    modified_mols, _ = modify(mols, k_soft=3)
+    options = json.loads(str(modified_mols[0].property("ghostly_options")))
+    assert options["k_soft"] == 3
+
+    with pytest.raises(ValueError, match="already been modified"):
+        modify(modified_mols)
+
+    forced_mols, _ = modify(modified_mols, k_soft=4, force=True)
+    options = json.loads(str(forced_mols[0].property("ghostly_options")))
+    assert options["k_soft"] == 4
+
+
 def test_single_well_overrides_soften_anchors():
     """
     Test that single-well and stiffened rotamer terms replace softened
