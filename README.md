@@ -170,4 +170,8 @@ modifications that were made.
 > When a stream file is used as input, the `--mapping` option is ignored. and
 > the output will always be a stream file, regardless of the `--output-format` option.
 
+Modified molecules in the stream file record the options used in a
+`ghostly_options` property, and ghostly will refuse to modify them again. To
+apply new modifications on top of the existing ones, use the `--force` option.
+
 Please run `ghostly --help` for more details of other configuration options.

@@ -246,6 +246,17 @@ def run():
     )
 
     parser.add_argument(
+        "--force",
+        action=argparse.BooleanOptionalAction,
+        help="""
+             Modify a system that has already been modified by ghostly. The new
+             modifications are applied on top of the existing ones.
+             """,
+        default=False,
+        required=False,
+    )
+
+    parser.add_argument(
         "--output-prefix",
         type=str,
         help="File prefix for the output file.",
@@ -426,6 +437,7 @@ def run():
             stiffen_ring_bridges=args.stiffen_ring_bridges,
             stiffen_sp2_bridges=args.stiffen_sp2_bridges,
             linearise_ring_break=args.linearise_ring_break,
+            force=args.force,
         )
     except Exception as e:
         logger.error(
