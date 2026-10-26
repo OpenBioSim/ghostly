@@ -717,6 +717,267 @@ def test_pfkfb3_48_to_47_skipped_neighbour():
             assert str(p.function()) == original[idx]
 
 
+def test_stiffen_rotamers_reference_geometry():
+    """
+    Test that stiffened rotamer anchor dihedrals have their minimum at the
+    geometry of the end state where the ghosts are physical. The three ghosts
+    on bridge 3 of hexane to propane are staggered at 60, 180 and 300 degrees
+    about the 2-3 bond.
+    """
+
+    import sire.morph as morph
+
+    mols = sr.load_test_files("hex2prp.s3")
+
+    new_mols, modifications = modify(mols, stiffen_rotamers=True, k_rotamer=50)
+
+    stiffened = modifications["lambda_1"]["stiffened_dihedrals"]
+    assert set(stiffened) == {"1,2,3,4", "1,2,3,13", "1,2,3,14"}
+
+    energies = dihedral_energies(new_mols[0], "dihedral1", morph.link_to_reference)
+    for dihedral in stiffened:
+        assert abs(energies[dihedral]) < 1e-6
+
+
+def test_single_well_anchors():
+    """
+    Test that anchor dihedrals are replaced with single-well terms whose
+    minimum is the geometry of the end state where the ghosts are physical.
+    The three ghosts on bridge 3 of hexane to propane are staggered at 60,
+    180 and 300 degrees about the 2-3 bond.
+    """
+
+    import sire.morph as morph
+
+    mols = sr.load_test_files("hex2prp.s3")
+
+    default_mols, default = modify(mols)
+    new_mols, modifications = modify(mols, single_well_anchors=True)
+
+    # Only the functional form changes, not which dihedrals survive.
+    assert (
+        new_mols[0].property("dihedral1").num_functions()
+        == default_mols[0].property("dihedral1").num_functions()
+    )
+    removed = modifications["lambda_1"]["removed_dihedrals"]
+    assert removed == default["lambda_1"]["removed_dihedrals"]
+
+    single_well = modifications["lambda_1"]["single_well_dihedrals"]
+    assert set(single_well) == {"1,2,3,4", "1,2,3,13", "1,2,3,14"}
+    assert modifications["lambda_0"]["single_well_dihedrals"] == []
+
+    energies = dihedral_energies(new_mols[0], "dihedral1", morph.link_to_reference)
+    for dihedral in single_well:
+        assert abs(energies[dihedral]) < 1e-6
+
+
+def test_fac4c_to_edo_single_well():
+    """
+    Test the single-well anchor for the ring-breaking perturbation FAC 4c to
+    EDO. At lambda = 1, carbon 36 becomes a carbonyl oxygen with ghost 67
+    attached, a terminal junction anchored through 10-12-36-67. The default
+    n=2 anchor has wells at both cis and trans, so the ghost can be trapped
+    trans at intermediate lambda. The single well keeps only cis.
+    """
+
+    import sire.morph as morph
+
+    mols = sr.load_test_files("fac4c_edo.s3")
+
+    new_mols, modifications = modify(mols, single_well_anchors=True, k_single_well=5)
+
+    assert modifications["lambda_0"]["single_well_dihedrals"] == []
+    assert modifications["lambda_1"]["single_well_dihedrals"] == ["10,12,36,67"]
+    assert modifications["lambda_1"]["removed_dihedrals"] == ["13,12,36,67"]
+
+    energies = dihedral_energies(new_mols[0], "dihedral1", morph.link_to_reference)
+    assert abs(energies["10,12,36,67"]) < 1e-6
+
+    # Rotating the ghost to trans gives the full barrier of 2k.
+    mol = morph.link_to_reference(new_mols[0])
+    cursor = mol.cursor()
+    cursor.dihedral("atomidx 10", "atomidx 12", "atomidx 36", "atomidx 67").change_size(
+        180 * sr.units.degrees, move_all=False
+    )
+    trans = dihedral_energies(cursor.commit(), "dihedral1", lambda m: m)
+    assert abs(trans["10,12,36,67"] - 10) < 1e-3
+
+
+def test_soften_anchors():
+    """
+    Test that surviving mixed dihedrals are scaled by soften_anchors, and
+    removed when it is zero.
+    """
+
+    mols = sr.load_test_files("hex2prp.s3")
+
+    default_mols, _ = modify(mols)
+    soft_mols, soft = modify(mols, soften_anchors=0.5)
+    removed_mols, removed = modify(mols, soften_anchors=0.0)
+
+    anchors = {"1,2,3,4", "1,2,3,13", "1,2,3,14"}
+    assert anchors <= set(soft["lambda_1"]["softened_dihedrals"])
+    assert anchors <= set(removed["lambda_1"]["removed_dihedrals"])
+
+    default = dihedral_functions(default_mols[0], "dihedral1")
+    softened = dihedral_functions(soft_mols[0], "dihedral1")
+    remaining = dihedral_functions(removed_mols[0], "dihedral1")
+
+    for dihedral in soft["lambda_1"]["softened_dihedrals"]:
+        for phi in (0.0, 1.0, 2.0, 3.0):
+            assert (
+                abs(
+                    evaluate(softened[dihedral], phi)
+                    - 0.5 * evaluate(default[dihedral], phi)
+                )
+                < 1e-6
+            )
+
+    assert not anchors & set(remaining)
+
+
+def test_single_well_overrides_soften_anchors():
+    """
+    Test that single-well and stiffened rotamer terms replace softened
+    anchors and that each dihedral is recorded under a single modification.
+    """
+
+    mols = sr.load_test_files("hex2prp.s3")
+
+    anchors = {"1,2,3,4", "1,2,3,13", "1,2,3,14"}
+
+    _, modifications = modify(mols, soften_anchors=0.5, single_well_anchors=True)
+    assert set(modifications["lambda_1"]["single_well_dihedrals"]) == anchors
+    assert not anchors & set(modifications["lambda_1"]["softened_dihedrals"])
+
+    _, modifications = modify(
+        mols, soften_anchors=0.5, single_well_anchors=True, stiffen_rotamers=True
+    )
+    assert set(modifications["lambda_1"]["stiffened_dihedrals"]) == anchors
+    assert modifications["lambda_1"]["single_well_dihedrals"] == []
+    assert not anchors & set(modifications["lambda_1"]["softened_dihedrals"])
+
+
+def test_single_well_skips_zero_anchor():
+    """
+    Test that an anchor dihedral with a zero force constant is not turned
+    into a single-well restraint.
+    """
+
+    from sire.legacy.CAS import Expression
+    from sire.legacy.Mol import AtomIdx
+
+    mols = sr.load_test_files("hex2prp.s3")
+
+    dihedrals = mols[0].property("dihedral1")
+    dihedrals.set(AtomIdx(1), AtomIdx(2), AtomIdx(3), AtomIdx(4), Expression(0))
+    mol = mols[0].edit().set_property("dihedral1", dihedrals).molecule().commit()
+    mols.update(mol)
+
+    _, modifications = modify(mols, single_well_anchors=True)
+
+    assert set(modifications["lambda_1"]["single_well_dihedrals"]) == {
+        "1,2,3,13",
+        "1,2,3,14",
+    }
+
+
+def test_single_well_skips_linear_reference():
+    """
+    Test that an anchor dihedral is left unchanged when a bond angle of its
+    reference geometry is linear, so that the reference dihedral is undefined.
+    """
+
+    from sire.legacy.Mol import AtomIdx
+
+    mols = sr.load_test_files("hex2prp.s3")
+
+    # Place ghost 4 on the extension of the 2-3 bond in the lambda = 0 state.
+    c2 = mols[0].atom(AtomIdx(2)).property("coordinates0")
+    c3 = mols[0].atom(AtomIdx(3)).property("coordinates0")
+    c4 = c3 + (c3 - c2).normalise() * 1.53
+    mol = mols[0].edit().atom(AtomIdx(4)).set_property("coordinates0", c4)
+    mols.update(mol.molecule().commit())
+
+    new_mols, modifications = modify(mols, single_well_anchors=True)
+
+    assert set(modifications["lambda_1"]["single_well_dihedrals"]) == {
+        "1,2,3,13",
+        "1,2,3,14",
+    }
+
+    default = dihedral_functions(modify(mols)[0][0], "dihedral1")
+    single_well = dihedral_functions(new_mols[0], "dihedral1")
+    assert str(single_well["1,2,3,4"]) == str(default["1,2,3,4"])
+
+
+def test_single_well_skips_reference_ghost():
+    """
+    Test that no single-well term is built when one of the atoms is a ghost
+    in the reference state.
+    """
+
+    import sire.morph as morph
+    from sire.legacy.Mol import AtomIdx
+
+    from ghostly._ghostly import _single_well
+
+    mol = sr.load_test_files("hex2prp.s3")[0]
+    ref = morph.link_to_reference(mol)
+    idxs = (AtomIdx(1), AtomIdx(2), AtomIdx(3), AtomIdx(4))
+
+    assert _single_well(ref, idxs, 5, set()) is not None
+    assert _single_well(ref, idxs, 5, {AtomIdx(1)}) is None
+
+
+def dihedral_functions(mol, prop):
+    """
+    Return a dictionary mapping dihedral indices to their functions.
+    """
+
+    info = mol.info()
+
+    return {
+        ",".join(
+            str(info.atom_idx(a).value())
+            for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())
+        ): p.function()
+        for p in mol.property(prop).potentials()
+    }
+
+
+def evaluate(function, phi):
+    """
+    Evaluate a dihedral function at the given angle in radians.
+    """
+
+    from sire.legacy.CAS import Symbol, Values
+
+    values = Values()
+    values.set(Symbol("phi"), phi)
+
+    return function.evaluate(values)
+
+
+def dihedral_energies(mol, prop, link):
+    """
+    Return the energy of each dihedral in the given dihedral property,
+    evaluated at the coordinates of the linked end state.
+    """
+
+    dihedrals = mol.property(prop)
+    ref = link(mol).edit().set_property("dihedral", dihedrals).molecule().commit()
+    info = mol.info()
+
+    energies = {}
+    for p in dihedrals.potentials():
+        idx = [info.atom_idx(a) for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())]
+        key = ",".join(str(i.value()) for i in idx)
+        energies[key] = ref.dihedral(*idx).energy().value()
+
+    return energies
+
+
 def check_angle(info, potentials, idx0, idx1, idx2):
     """
     Check if an angle potential is in a list of potentials.

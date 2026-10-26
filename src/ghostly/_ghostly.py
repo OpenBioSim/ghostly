@@ -52,6 +52,8 @@ def modify(
     optimise_angles=False,
     num_optimise=10,
     soften_anchors=1.0,
+    single_well_anchors=False,
+    k_single_well=5,
     stiffen_rotamers=False,
     k_rotamer=50,
     stiffen_ring_bridges=False,
@@ -113,13 +115,34 @@ def modify(
         constrained too tightly, particularly when multiple ghost groups
         share hub atoms.
 
+    single_well_anchors : bool, optional
+        Whether to replace each surviving anchor dihedral, i.e. one with a
+        single ghost terminal atom and three physical atoms, with a single-well
+        n=1 cosine potential whose minimum is the dihedral angle of the end
+        state where the ghost is physical. Multi-well anchor dihedrals can trap
+        ghost atoms in an alternative well at intermediate lambda, which
+        appears as hysteresis between independently equilibrated windows.
+        Applied to all junction types. Single-well terms replace, rather than
+        scale, softened anchors, and ``stiffen_rotamers`` takes precedence on
+        rotatable bonds. Anchors with zero force constants, or whose reference
+        dihedral is ill-defined, are left unchanged. Has no effect when
+        ``soften_anchors`` is 0.0, since all mixed dihedrals are removed.
+        Default is False.
+
+    k_single_well : float, optional
+        The force constant for the single-well anchor dihedrals (in kcal/mol).
+        The resulting barrier height is ``2 * k_single_well``. Only used when
+        ``single_well_anchors`` is True.
+
     stiffen_rotamers : bool, optional
         Whether to replace rotamer anchor dihedrals with a stiff single-well
         cosine potential. When a bridge--physical bond is rotatable (not in a
         ring, sp3 bridge), surviving anchor dihedrals can allow rotameric
         transitions of ghost atoms at intermediate lambda. Enabling this
         replaces those dihedrals with a single cosine well of depth
-        ``2 * k_rotamer``. Default is False (only log warnings).
+        ``2 * k_rotamer``, with its minimum at the dihedral angle of the end
+        state where the ghosts are physical. Default is False (only log
+        warnings).
 
     k_rotamer : float, optional
         The force constant for the replacement cosine well when stiffening
@@ -198,6 +221,7 @@ def modify(
         "softened_angles": {},
         "softened_dihedrals": [],
         "stiffened_dihedrals": [],
+        "single_well_dihedrals": [],
         "linearised_ring_break": [],
         "softened_bonds": {},
     }
@@ -208,6 +232,7 @@ def modify(
         "softened_angles": {},
         "softened_dihedrals": [],
         "stiffened_dihedrals": [],
+        "single_well_dihedrals": [],
         "linearised_ring_break": [],
         "softened_bonds": {},
     }
@@ -429,24 +454,19 @@ def modify(
             mol, ghosts0, modifications, skip_ghosts=linearised0, is_lambda1=False
         )
 
-        # Soften any surviving mixed ghost/physical dihedrals.
-        mol = _soften_mixed_dihedrals(
-            mol,
-            ghosts0,
-            modifications,
-            soften_anchors=soften_anchors,
-            is_lambda1=False,
-        )
-
-        # Check for potential rotamer anchor dihedrals.
-        mol = _check_rotamer_anchors(
+        # Soften, single-well or stiffen surviving mixed ghost/physical dihedrals.
+        mol = _modify_mixed_dihedrals(
             mol,
             bridges0,
             physical0,
             ghosts0,
+            ghosts1,
             modifications,
             is_lambda1=False,
-            stiffen=stiffen_rotamers,
+            soften_anchors=soften_anchors,
+            single_well_anchors=single_well_anchors,
+            k_single_well=k_single_well,
+            stiffen_rotamers=stiffen_rotamers,
             k_rotamer=k_rotamer,
         )
 
@@ -543,24 +563,19 @@ def modify(
             mol, ghosts1, modifications, skip_ghosts=linearised1, is_lambda1=True
         )
 
-        # Soften any surviving mixed ghost/physical dihedrals.
-        mol = _soften_mixed_dihedrals(
-            mol,
-            ghosts1,
-            modifications,
-            soften_anchors=soften_anchors,
-            is_lambda1=True,
-        )
-
-        # Check for potential rotamer anchor dihedrals.
-        mol = _check_rotamer_anchors(
+        # Soften, single-well or stiffen surviving mixed ghost/physical dihedrals.
+        mol = _modify_mixed_dihedrals(
             mol,
             bridges1,
             physical1,
             ghosts1,
+            ghosts0,
             modifications,
             is_lambda1=True,
-            stiffen=stiffen_rotamers,
+            soften_anchors=soften_anchors,
+            single_well_anchors=single_well_anchors,
+            k_single_well=k_single_well,
+            stiffen_rotamers=stiffen_rotamers,
             k_rotamer=k_rotamer,
         )
 
@@ -2213,9 +2228,7 @@ def _linearise_ring_break(
     from sire.convert import to_rdkit as _to_rdkit
     from rdkit.Chem import ChiralType as _ChiralType
 
-    phys_mol = (
-        _morph.link_to_reference(mol) if is_lambda1 else _morph.link_to_perturbed(mol)
-    )
+    phys_mol = _physical_state(mol, is_lambda1)
     rdmol = _to_rdkit(phys_mol)
 
     linearised = set()
@@ -2461,23 +2474,48 @@ def _remove_ghost_centre_angles(
     return mol
 
 
-def _soften_mixed_dihedrals(
-    mol, ghosts, modifications, soften_anchors=1.0, is_lambda1=False
+def _modify_mixed_dihedrals(
+    mol,
+    bridges,
+    physical,
+    ghosts,
+    ref_ghosts,
+    modifications,
+    is_lambda1=False,
+    soften_anchors=1.0,
+    single_well_anchors=False,
+    k_single_well=5,
+    stiffen_rotamers=False,
+    k_rotamer=50,
 ):
     r"""
-    Soften surviving mixed ghost/physical dihedral terms by scaling their
-    force constants. This is a post-processing step that runs after all
-    per-bridge junction handlers and residual removal passes.
+    Post-process surviving mixed ghost/physical dihedral terms. This runs
+    after all per-bridge junction handlers and residual removal passes.
 
     A "mixed" dihedral is one that involves at least one ghost atom and at
-    least one physical atom. These dihedrals couple the ghost and physical
-    regions and can cause dynamics crashes at small lambda when the ghost
-    atoms start gaining softcore nonbonded interactions but are constrained
-    too tightly by bonded terms.
+    least one physical atom. Each is modified at most once, with the first
+    applicable action taking precedence:
 
-    When ``soften_anchors`` is 1.0 (default), no modifications are made.
-    When 0.0, all mixed dihedrals are removed. Intermediate values scale
-    the force constants.
+    1. Removed, when ``soften_anchors`` is 0.0.
+    2. Stiffened, when ``stiffen_rotamers`` is True and the dihedral spans a
+       rotatable sp3 bridge--physical bond with a ghost terminal atom.
+    3. Replaced with a single well of ``k_single_well``, when
+       ``single_well_anchors`` is True and the dihedral is a non-zero anchor,
+       i.e. a single ghost terminal atom and three physical atoms.
+    4. Scaled by ``soften_anchors``, when it is less than 1.0.
+
+    Stiffened and single-well terms are n=1 cosine wells:
+
+        V(phi) = k [1 + cos(phi - phi_ref + pi)]
+
+    with a single minimum at phi_ref, the dihedral angle measured in the end
+    state where the ghost is physical, and a barrier of 2k. When phi_ref is
+    ill-defined the term falls through to the next action.
+
+    Rotatable sp3 bridge--physical bonds are always logged as warnings when
+    ``stiffen_rotamers`` is False, since rotameric transitions of ghost atoms
+    at intermediate lambda can degrade convergence (see Boresch et al., JCTC
+    2021).
 
     Parameters
     ----------
@@ -2485,17 +2523,41 @@ def _soften_mixed_dihedrals(
     mol : sire.mol.Molecule
         The perturbable molecule.
 
+    bridges : dict
+        A dictionary mapping bridge atoms to their ghost neighbours.
+
+    physical : dict
+        A dictionary mapping bridge atoms to their physical neighbours.
+
     ghosts : List[sire.legacy.Mol.AtomIdx]
         The list of ghost atoms at the current end state.
+
+    ref_ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the opposite end state.
 
     modifications : dict
         A dictionary to store details of the modifications made.
 
+    is_lambda1 : bool, optional
+        Whether to modify dihedrals at lambda = 1.
+
     soften_anchors : float, optional
         Scale factor for mixed dihedral force constants (0.0 to 1.0).
 
-    is_lambda1 : bool, optional
-        Whether to modify dihedrals at lambda = 1.
+    single_well_anchors : bool, optional
+        Whether to replace anchor dihedrals with single-well terms.
+
+    k_single_well : float, optional
+        The force constant for the single-well terms. (In kcal/mol)
+
+    stiffen_rotamers : bool, optional
+        Whether to replace rotamer anchor dihedrals with stiff single-well
+        terms.
+
+    k_rotamer : float, optional
+        The force constant for the stiffened rotamer terms. (In kcal/mol)
+        The default of 50 is a placeholder and has not been calibrated
+        against simulation data. It should be benchmarked before use.
 
     Returns
     -------
@@ -2504,8 +2566,26 @@ def _soften_mixed_dihedrals(
         The updated molecule.
     """
 
-    # Nothing to do if there are no ghost atoms or no softening is requested.
-    if not ghosts or soften_anchors >= 1.0:
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
+
+    ghosts = set(ghosts)
+    ref_ghosts = set(ref_ghosts)
+
+    # The ghosts are physical at the opposite end state.
+    ref = _physical_state(mol, is_lambda1)
+
+    rotatable_bonds = _find_rotatable_bonds(
+        ref, bridges, physical, is_lambda1=is_lambda1, warn=not stiffen_rotamers
+    )
+
+    # Nothing to do if no modifications are requested.
+    if (
+        soften_anchors >= 1.0
+        and not single_well_anchors
+        and not (stiffen_rotamers and rotatable_bonds)
+    ):
         return mol
 
     # Store the molecular info.
@@ -2536,27 +2616,64 @@ def _soften_mixed_dihedrals(
         idx3 = info.atom_idx(p.atom3())
 
         atoms = (idx0, idx1, idx2, idx3)
-        has_ghost = any(a in ghosts for a in atoms)
-        has_physical = any(a not in ghosts for a in atoms)
+        is_ghost = [a in ghosts for a in atoms]
 
-        if has_ghost and has_physical:
-            dih_idx_str = ",".join(str(a.value()) for a in atoms)
-            if soften_anchors > 0.0:
-                scaled = p.function() * soften_anchors
-                new_dihedrals.set(idx0, idx1, idx2, idx3, scaled)
-                _logger.debug(
-                    f"  Softening mixed dihedral: [{dih_idx_str}], "
-                    f"scale={soften_anchors}"
-                )
-                modifications[mod_key]["softened_dihedrals"].append(dih_idx_str)
-            else:
-                _logger.debug(
-                    f"  Removing mixed dihedral: [{dih_idx_str}], {p.function()}"
-                )
-                modifications[mod_key]["removed_dihedrals"].append(dih_idx_str)
-            modified = True
-        else:
+        # Leave dihedrals that are entirely ghost or entirely physical.
+        if all(is_ghost) or not any(is_ghost):
             new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+            continue
+
+        dih_idx_str = ",".join(str(a.value()) for a in atoms)
+        has_ghost_terminal = is_ghost[0] or is_ghost[3]
+        is_anchor = sum(is_ghost) == 1 and has_ghost_terminal
+
+        if soften_anchors <= 0.0:
+            _logger.debug(f"  Removing mixed dihedral: [{dih_idx_str}], {p.function()}")
+            modifications[mod_key]["removed_dihedrals"].append(dih_idx_str)
+            modified = True
+            continue
+
+        function = None
+        if (
+            stiffen_rotamers
+            and has_ghost_terminal
+            and ((idx1, idx2) in rotatable_bonds or (idx2, idx1) in rotatable_bonds)
+        ):
+            function = _single_well(ref, atoms, k_rotamer, ref_ghosts)
+            if function is not None:
+                _logger.debug(
+                    f"  Stiffening rotamer anchor dihedral: [{dih_idx_str}], "
+                    f"{p.function()} --> {function}"
+                )
+                modifications[mod_key]["stiffened_dihedrals"].append(dih_idx_str)
+
+        if (
+            function is None
+            and single_well_anchors
+            and is_anchor
+            and not p.function().is_zero()
+        ):
+            function = _single_well(ref, atoms, k_single_well, ref_ghosts)
+            if function is not None:
+                _logger.debug(
+                    f"  Single-well anchor dihedral: [{dih_idx_str}], "
+                    f"{p.function()} --> {function}"
+                )
+                modifications[mod_key]["single_well_dihedrals"].append(dih_idx_str)
+
+        if function is None and soften_anchors < 1.0:
+            function = p.function() * soften_anchors
+            _logger.debug(
+                f"  Softening mixed dihedral: [{dih_idx_str}], scale={soften_anchors}"
+            )
+            modifications[mod_key]["softened_dihedrals"].append(dih_idx_str)
+
+        if function is None:
+            function = p.function()
+        else:
+            modified = True
+
+        new_dihedrals.set(idx0, idx1, idx2, idx3, function)
 
     # Set the updated dihedrals.
     if modified:
@@ -2566,39 +2683,16 @@ def _soften_mixed_dihedrals(
             .molecule()
             .commit()
         )
-        n_softened = len(modifications[mod_key]["softened_dihedrals"])
-        lam = f"{_lam_sym}={int(is_lambda1)}"
-        if soften_anchors > 0.0:
-            _logger.debug(
-                f"Softened {n_softened} mixed ghost/physical dihedrals at "
-                f"{lam} (scale={soften_anchors})"
-            )
-        else:
-            _logger.debug(f"Removed all mixed ghost/physical dihedrals at {lam}")
 
     # Return the updated molecule.
     return mol
 
 
-def _check_rotamer_anchors(
-    mol,
-    bridges,
-    physical,
-    ghosts,
-    modifications,
-    is_lambda1=False,
-    stiffen=False,
-    k_rotamer=50,
-):
+def _find_rotatable_bonds(ref, bridges, physical, is_lambda1=False, warn=True):
     r"""
-    Detect and optionally stiffen rotamer anchor dihedrals.
-
-    After ghost modifications, each bridge atom retains anchor dihedral(s)
-    that constrain the ghost group's rotation. If the bridge--physical bond
-    is not in a ring and the bridge atom is sp3-hybridised, the anchor
-    dihedral is likely a rotamer. This can allow the ghost group to flip
-    between rotameric states at intermediate lambda, degrading convergence
-    (see Boresch et al., JCTC 2021).
+    Find the rotatable bridge--physical bonds, i.e. those that are not in a
+    ring and have an sp3 bridge atom, so that surviving anchor dihedrals
+    across them can allow rotameric transitions of ghost atoms.
 
         R1     DR1
           \   /
@@ -2608,19 +2702,12 @@ def _check_rotamer_anchors(
           /   \
         R2     DR3
 
-    Rotamer anchors are always logged as warnings. When ``stiffen=True``,
-    affected dihedrals (those spanning the rotatable bond with at least one
-    ghost terminal) are replaced with a single n=1 cosine well:
-
-        V(phi) = k [1 + cos(phi - pi)]
-
-    which has a single minimum at phi = 0 (trans) and a barrier of 2k.
-
     Parameters
     ----------
 
-    mol : sire.mol.Molecule
-        The perturbable molecule.
+    ref : sire.mol.Molecule
+        The perturbable molecule linked to the end state where the ghosts
+        are physical.
 
     bridges : dict
         A dictionary mapping bridge atoms to their ghost neighbours.
@@ -2628,57 +2715,34 @@ def _check_rotamer_anchors(
     physical : dict
         A dictionary mapping bridge atoms to their physical neighbours.
 
-    ghosts : List[sire.legacy.Mol.AtomIdx]
-        The list of ghost atoms at the current end state.
-
-    modifications : dict
-        A dictionary to store details of the modifications made.
-
     is_lambda1 : bool, optional
-        Whether to check/modify the lambda = 1 end state.
+        Whether the bridges are at lambda = 1.
 
-    stiffen : bool, optional
-        Whether to replace rotamer anchor dihedrals with a stiff cosine
-        well. If False (default), only log warnings.
-
-    k_rotamer : float, optional
-        The force constant for the replacement cosine term. The resulting
-        barrier height is 2 * k_rotamer. (In kcal/mol) Only used when
-        ``stiffen=True``. The default of 50 is a placeholder and has not
-        been calibrated against simulation data. It should be benchmarked
-        before use.
+    warn : bool, optional
+        Whether to log a warning for each rotatable bond.
 
     Returns
     -------
 
-    mol : sire.mol.Molecule
-        The updated molecule (unchanged if ``stiffen=False``).
+    rotatable_bonds : set
+        The (physical, bridge) atom index pairs of the rotatable bonds.
     """
+
+    rotatable_bonds = set()
 
     # Nothing to do if there are no bridges.
     if not bridges:
-        return mol
+        return rotatable_bonds
 
     from rdkit.Chem import HybridizationType
     from sire.convert import to_rdkit
 
-    lam = int(is_lambda1)
-
-    # Check hybridisation and ring membership at the state where the ghost is
-    # physically present. For bridges0, the ghost is physically present at
-    # lambda=1 (it is ghost/virtual at lambda=0). For bridges1, the ghost is
-    # physically present at lambda=0.
     try:
-        if is_lambda1:
-            rdmol = to_rdkit(_morph.link_to_reference(mol))
-        else:
-            rdmol = to_rdkit(_morph.link_to_perturbed(mol))
+        rdmol = to_rdkit(ref)
     except Exception as e:
         _logger.warning(f"Failed to convert molecule to RDKit for rotamer check: {e}")
-        return mol
+        return rotatable_bonds
 
-    # Identify rotatable bridge--physical bond pairs.
-    rotatable_bonds = set()
     for bridge in bridges:
         for p in physical[bridge]:
             b_idx = bridge.value()
@@ -2688,8 +2752,7 @@ def _check_rotamer_anchors(
             if rd_bond is None or rd_bond.IsInRing():
                 continue
 
-            rd_bridge = rdmol.GetAtomWithIdx(b_idx)
-            hybridisation = rd_bridge.GetHybridization()
+            hybridisation = rdmol.GetAtomWithIdx(b_idx).GetHybridization()
 
             if hybridisation in (
                 HybridizationType.SP3,
@@ -2697,86 +2760,61 @@ def _check_rotamer_anchors(
                 HybridizationType.SP3D2,
             ):
                 rotatable_bonds.add((p, bridge))
-                if not stiffen:
+                if warn:
                     _logger.warning(
-                        f"Potential rotamer anchor at {_lam_sym} = {lam}: "
+                        f"Potential rotamer anchor at {_lam_sym} = {int(is_lambda1)}: "
                         f"bond {p_idx}-{b_idx} is a rotatable sp3 bond. "
                         f"Surviving anchor dihedrals may allow rotameric "
                         f"transitions of ghost atoms."
                     )
 
-    # If not stiffening, or no rotatable bonds found, return early.
-    if not stiffen or not rotatable_bonds:
-        return mol
+    return rotatable_bonds
 
-    # Stiffen the anchor dihedrals spanning the rotatable bonds.
 
+def _physical_state(mol, is_lambda1=False):
+    """
+    Return the molecule linked to the end state where the ghost atoms of the
+    given end state are physical.
+    """
+    if is_lambda1:
+        return _morph.link_to_reference(mol)
+    else:
+        return _morph.link_to_perturbed(mol)
+
+
+def _single_well(ref, idxs, k, ref_ghosts, max_angle=170):
+    """
+    Return a single-well n=1 cosine dihedral term, k[1 + cos(phi - phi_ref + pi)],
+    with its minimum at the dihedral angle phi_ref of the atoms ``idxs`` in the
+    reference molecule ``ref``. Returns None when phi_ref is ill-defined, i.e.
+    an atom is a ghost in the reference state or a bond angle is near linear.
+    """
     from math import pi
 
     from sire.legacy.CAS import Symbol
 
-    # Get the end state property suffix.
-    if is_lambda1:
-        mod_key = "lambda_1"
-        suffix = "1"
-    else:
-        mod_key = "lambda_0"
-        suffix = "0"
+    dih_idx_str = ",".join(str(a.value()) for a in idxs)
 
-    # Store the molecular info.
-    info = mol.info()
-
-    # Get the end state dihedral functions.
-    dihedrals = mol.property("dihedral" + suffix)
-
-    # Create the stiff single-well replacement: k[1 + cos(phi - pi)].
-    # Minimum at phi = 0 (trans), barrier height = 2k.
-    replacement = _SireMM.AmberDihedral(
-        _SireMM.AmberDihPart(k_rotamer, 1, pi)
-    ).to_expression(Symbol("phi"))
-
-    # Initialise a container to store the updated dihedral functions.
-    new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
-
-    modified = False
-
-    for p in dihedrals.potentials():
-        idx0 = info.atom_idx(p.atom0())
-        idx1 = info.atom_idx(p.atom1())
-        idx2 = info.atom_idx(p.atom2())
-        idx3 = info.atom_idx(p.atom3())
-
-        # Check if the central bond (idx1-idx2) is a rotatable bridge bond
-        # and at least one terminal atom is ghost.
-        bond_pair = (idx1, idx2)
-        bond_pair_rev = (idx2, idx1)
-        has_ghost_terminal = idx0 in ghosts or idx3 in ghosts
-
-        if has_ghost_terminal and (
-            bond_pair in rotatable_bonds or bond_pair_rev in rotatable_bonds
-        ):
-            _logger.debug(
-                f"  Stiffening rotamer anchor dihedral: "
-                f"[{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], "
-                f"{p.function()} --> {replacement}"
-            )
-            new_dihedrals.set(idx0, idx1, idx2, idx3, replacement)
-            dih_idx = (idx0.value(), idx1.value(), idx2.value(), idx3.value())
-            dih_idx = ",".join([str(i) for i in dih_idx])
-            modifications[mod_key]["stiffened_dihedrals"].append(dih_idx)
-            modified = True
-        else:
-            new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
-
-    if modified:
-        mol = (
-            mol.edit()
-            .set_property("dihedral" + suffix, new_dihedrals)
-            .molecule()
-            .commit()
+    if any(a in ref_ghosts for a in idxs):
+        _logger.warning(
+            f"Keeping dihedral [{dih_idx_str}]: an atom is a ghost in the "
+            "reference state, so the reference dihedral is undefined."
         )
+        return None
 
-    return mol
+    for angle in (idxs[:3], idxs[1:]):
+        if ref.angle(*angle).size().to("degrees") > max_angle:
+            _logger.warning(
+                f"Keeping dihedral [{dih_idx_str}]: a bond angle is near linear, "
+                "so the reference dihedral is undefined."
+            )
+            return None
+
+    phi_ref = ref.dihedral(*idxs).size().to("radians")
+
+    return _SireMM.AmberDihedral(
+        _SireMM.AmberDihPart(k, 1, phi_ref - pi)
+    ).to_expression(Symbol("phi"))
 
 
 def _create_connectivity(mol):

@@ -6,6 +6,8 @@ Changelog
 
 * Please add an item to this CHANGELOG for any new features or bug fixes when creating a PR.
 * Stiffen the intraghost angle to 180 degrees for dual junctions with two ghost branches instead of removing it. With both ghosts confined to the normal of the physical plane, removal left the same-side arrangement degenerate at the end state, giving large free energy errors for e.g. methoxy and hydroxyl perturbations when the input geometry had both ghosts on the same side [#17](https://github.com/OpenBioSim/ghostly/pull/17).
+* Fixed ``--stiffen-rotamers`` placing the minimum of every stiffened dihedral at 0 degrees (cis), which eclipsed the ghosts with the anchor and stacked multiple ghosts on the same bridge. The minimum is now the dihedral angle measured in the end state where the ghosts are physical [#19](https://github.com/OpenBioSim/ghostly/pull/19).
+* Added ``--single-well-anchors`` and ``--k-single-well`` to replace surviving anchor dihedrals with a single-well cosine potential whose minimum is the geometry of the end state where the ghost is physical. Multi-well anchors, e.g. the n=2 term of a dummy hydrogen on a carbonyl oxygen, can trap ghosts in an alternative well at intermediate lambda, giving hysteresis between independently equilibrated windows. Anchors with zero force constants or an ill-defined reference dihedral are left unchanged. (Default: False, 5 kcal/mol) [#19](https://github.com/OpenBioSim/ghostly/pull/19).
 
 [2026.2.0](https://github.com/openbiosim/ghostly/compare/2026.1.0...2026.2.0) - Sep 2026
 ----------------------------------------------------------------------------------------
