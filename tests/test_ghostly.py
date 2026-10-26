@@ -849,15 +849,15 @@ def test_modified_flag():
     mols = sr.load_test_files("hex2prp.s3")
 
     modified_mols, _ = modify(mols, k_soft=3)
-    options = json.loads(str(modified_mols[0].property("ghostly_options")))
-    assert options["k_soft"] == 3
+    history = json.loads(str(modified_mols[0].property("ghostly_options")))
+    assert [options["k_soft"] for options in history] == [3]
 
     with pytest.raises(ValueError, match="already been modified"):
         modify(modified_mols)
 
     forced_mols, _ = modify(modified_mols, k_soft=4, force=True)
-    options = json.loads(str(forced_mols[0].property("ghostly_options")))
-    assert options["k_soft"] == 4
+    history = json.loads(str(forced_mols[0].property("ghostly_options")))
+    assert [options["k_soft"] for options in history] == [3, 4]
 
 
 def test_single_well_overrides_soften_anchors():

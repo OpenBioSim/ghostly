@@ -187,8 +187,9 @@ def modify(
 
     system : sire.system.System
         The updated system. Each perturbable molecule has a ``ghostly_options``
-        property recording the options used, as a JSON string. Systems with
-        this property can only be modified again with ``force=True``.
+        property holding a JSON list of the options used for each
+        modification, in the order applied. Systems with this property can
+        only be modified again with ``force=True``.
 
     modifications : dict
         A dictionary containing details of the modifications made.
@@ -224,25 +225,24 @@ def modify(
             if mol.has_property("ghostly_options"):
                 raise ValueError(
                     "The system has already been modified by ghostly. "
-                    "Use 'force=True' to modify it again."
+                    "Use 'force=True', or '--force' from the command line, "
+                    "to modify it again."
                 )
 
-    options = _json.dumps(
-        {
-            "k_hard": k_hard,
-            "k_soft": k_soft,
-            "optimise_angles": optimise_angles,
-            "num_optimise": num_optimise,
-            "soften_anchors": soften_anchors,
-            "single_well_anchors": single_well_anchors,
-            "k_single_well": k_single_well,
-            "stiffen_rotamers": stiffen_rotamers,
-            "k_rotamer": k_rotamer,
-            "stiffen_ring_bridges": stiffen_ring_bridges,
-            "stiffen_sp2_bridges": stiffen_sp2_bridges,
-            "linearise_ring_break": linearise_ring_break,
-        }
-    )
+    options = {
+        "k_hard": k_hard,
+        "k_soft": k_soft,
+        "optimise_angles": optimise_angles,
+        "num_optimise": num_optimise,
+        "soften_anchors": soften_anchors,
+        "single_well_anchors": single_well_anchors,
+        "k_single_well": k_single_well,
+        "stiffen_rotamers": stiffen_rotamers,
+        "k_rotamer": k_rotamer,
+        "stiffen_ring_bridges": stiffen_ring_bridges,
+        "stiffen_sp2_bridges": stiffen_sp2_bridges,
+        "linearise_ring_break": linearise_ring_break,
+    }
 
     # Create the modifications dictionary.
     modifications = {}
@@ -613,7 +613,16 @@ def modify(
             k_rotamer=k_rotamer,
         )
 
-        mol = mol.edit().set_property("ghostly_options", options).molecule().commit()
+        history = []
+        if mol.has_property("ghostly_options"):
+            history = _json.loads(str(mol.property("ghostly_options")))
+        history.append(options)
+        mol = (
+            mol.edit()
+            .set_property("ghostly_options", _json.dumps(history))
+            .molecule()
+            .commit()
+        )
 
         # Update the molecule in the system.
         system.update(mol)
