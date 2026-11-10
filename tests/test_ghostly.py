@@ -1025,7 +1025,12 @@ def test_physical_connectivity_ring():
     # the ring, which stays a ring once the bonds to ghosts are removed.
     mol = sr.load_test_files("tol2pyr.s3")[0]
     connectivity = _create_connectivity(morph.link_to_perturbed(mol))
-    physical = _physical_connectivity(mol, connectivity, is_lambda1=True)
+    ghosts = [
+        AtomIdx(i)
+        for i, e in enumerate(mol.property("element1"))
+        if e.num_protons() == 0
+    ]
+    physical = _physical_connectivity(mol, connectivity, ghosts)
     assert not physical.are_bonded(AtomIdx(0), AtomIdx(1))
     assert _in_ring(physical, AtomIdx(1))
 
