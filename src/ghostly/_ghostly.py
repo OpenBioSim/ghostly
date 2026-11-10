@@ -140,7 +140,7 @@ def modify(
     stiffen_rotamers : bool, optional
         Whether to replace rotamer anchor dihedrals with a stiff single-well
         cosine potential. When a bridge--physical bond is rotatable (not in a
-        ring, sp3 bridge), surviving anchor dihedrals can allow rotameric
+        ring, non-planar bridge), surviving anchor dihedrals can allow rotameric
         transitions of ghost atoms at intermediate lambda. Enabling this
         replaces those dihedrals with a single cosine well of depth
         ``2 * k_rotamer``, with its minimum at the dihedral angle of the end
@@ -2465,7 +2465,7 @@ def _modify_mixed_dihedrals(
 
     1. Removed, when ``soften_anchors`` is 0.0.
     2. Stiffened, when ``stiffen_rotamers`` is True and the dihedral spans a
-       rotatable sp3 bridge--physical bond with a ghost terminal atom.
+       rotatable bridge--physical bond with a ghost terminal atom.
     3. Replaced with a single well of ``k_single_well``, when
        ``single_well_anchors`` is True and the dihedral is a non-zero anchor,
        i.e. a single ghost terminal atom and three physical atoms.
@@ -2479,7 +2479,7 @@ def _modify_mixed_dihedrals(
     state where the ghost is physical, and a barrier of 2k. When phi_ref is
     ill-defined the term falls through to the next action.
 
-    Rotatable sp3 bridge--physical bonds are always logged as warnings when
+    Rotatable bridge--physical bonds are always logged as warnings when
     ``stiffen_rotamers`` is False, since rotameric transitions of ghost atoms
     at intermediate lambda can degrade convergence (see Boresch et al., JCTC
     2021).
@@ -2658,13 +2658,14 @@ def _modify_mixed_dihedrals(
 def _find_rotatable_bonds(ref, bridges, physical, is_lambda1=False, warn=True):
     r"""
     Find the rotatable bridge--physical bonds, i.e. those that are not in a
-    ring and have an sp3 bridge atom, so that surviving anchor dihedrals
-    across them can allow rotameric transitions of ghost atoms.
+    ring and whose bridge atom is neither planar nor linear in the end state
+    where the ghosts are physical, so that surviving anchor dihedrals across
+    them can allow rotameric transitions of ghost atoms.
 
         R1     DR1
           \   /
            \ /
-            X ---DR2       X is sp3, P-X is rotatable
+            X ---DR2       X is non-planar, P-X is rotatable
            / \
           /   \
         R2     DR3
@@ -2701,22 +2702,14 @@ def _find_rotatable_bonds(ref, bridges, physical, is_lambda1=False, warn=True):
     if not bridges:
         return rotatable_bonds
 
-    from rdkit.Chem import HybridizationType
-
-    # The ghosts are physical at the opposite end state.
-    try:
-        rdmol, index = _to_rdkit_end_state(ref, not is_lambda1)
-    except Exception as e:
-        _logger.warning(f"Failed to convert molecule to RDKit for rotamer check: {e}")
-        return rotatable_bonds
-
     connectivity = _end_state_connectivity(ref, is_lambda1)
 
     for bridge in bridges:
-        for p in physical[bridge]:
-            b_idx = bridge.value()
-            p_idx = p.value()
+        # The ghosts are physical at the opposite end state.
+        if not _is_rotor(ref, bridge, not is_lambda1):
+            continue
 
+        for p in physical[bridge]:
             # Ring membership from the connectivity, since the physical
             # neighbour may be a ghost at the opposite end state.
             if not connectivity.are_bonded(p, bridge) or connectivity.in_ring(
@@ -2724,21 +2717,14 @@ def _find_rotatable_bonds(ref, bridges, physical, is_lambda1=False, warn=True):
             ):
                 continue
 
-            hybridisation = _hybridisation(rdmol.GetAtomWithIdx(index[b_idx]))
-
-            if hybridisation in (
-                HybridizationType.SP3,
-                HybridizationType.SP3D,
-                HybridizationType.SP3D2,
-            ):
-                rotatable_bonds.add((p, bridge))
-                if warn:
-                    _logger.warning(
-                        f"Potential rotamer anchor at {_lam_sym} = {int(is_lambda1)}: "
-                        f"bond {p_idx}-{b_idx} is a rotatable sp3 bond. "
-                        f"Surviving anchor dihedrals may allow rotameric "
-                        f"transitions of ghost atoms."
-                    )
+            rotatable_bonds.add((p, bridge))
+            if warn:
+                _logger.warning(
+                    f"Potential rotamer anchor at {_lam_sym} = {int(is_lambda1)}: "
+                    f"bond {p.value()}-{bridge.value()} is a rotatable bond. "
+                    f"Surviving anchor dihedrals may allow rotameric "
+                    f"transitions of ghost atoms."
+                )
 
     return rotatable_bonds
 
@@ -2791,14 +2777,11 @@ def _end_state_connectivity(mol, is_lambda1=False):
     return mol.property("connectivity")
 
 
-def _flattening_energy(mol, bridge, atoms, is_lambda1=False):
+def _angle_terms(mol, bridge, atoms, is_lambda1=False):
     """
-    Return the energy in kcal/mol needed to make the bridge atom and three of
-    its neighbours planar, starting from the minimum of the angle terms between
-    them, or None if any of those angle terms is missing.
+    Return the angle terms centred on the bridge atom between pairs of the
+    given atoms at an end state, keyed by the frozenset of the pair.
     """
-    from math import pi
-
     from sire.legacy.CAS import Symbol
 
     theta = Symbol("theta")
@@ -2813,7 +2796,18 @@ def _flattening_energy(mol, bridge, atoms, is_lambda1=False):
         idx2 = info.atom_idx(p.atom2()).value()
         if idx1 == bridge.value() and idx0 != idx2 and {idx0, idx2} <= neighbours:
             terms[frozenset((idx0, idx2))] = _SireMM.AmberAngle(p.function(), theta)
+    return terms
 
+
+def _flattening_energy(mol, bridge, atoms, is_lambda1=False):
+    """
+    Return the energy in kcal/mol needed to make the bridge atom and three of
+    its neighbours planar, starting from the minimum of the angle terms between
+    them, or None if any of those angle terms is missing.
+    """
+    from math import pi
+
+    terms = _angle_terms(mol, bridge, atoms, is_lambda1)
     if len(terms) != 3:
         return None
 
@@ -2825,21 +2819,30 @@ def _flattening_energy(mol, bridge, atoms, is_lambda1=False):
     return shortfall**2 / sum(1 / term.k() for term in terms.values())
 
 
-def _hybridisation(rdatom):
+def _is_rotor(mol, bridge, is_lambda1=False, max_angle=170):
     """
-    Return the hybridisation of an RDKit atom, treating sp2 atoms without a
-    double or aromatic bond, i.e. conjugated lone pairs, as sp3.
+    Return whether rotation about the bonds of the bridge atom can move its
+    other substituents at an end state, i.e. the bridge is neither planar, by
+    its angle terms, nor linear.
     """
-    from rdkit.Chem import BondType, HybridizationType
+    from math import degrees
 
-    hybridisation = rdatom.GetHybridization()
-    if hybridisation == HybridizationType.SP2 and not any(
-        bond.GetIsAromatic()
-        or bond.GetBondType() in (BondType.DOUBLE, BondType.AROMATIC)
-        for bond in rdatom.GetBonds()
-    ):
-        return HybridizationType.SP3
-    return hybridisation
+    elements = mol.property("element1" if is_lambda1 else "element0")
+    neighbours = [
+        n
+        for n in _end_state_connectivity(mol, is_lambda1).connections_to(bridge)
+        if elements[n.value()].num_protons() > 0
+    ]
+
+    if len(neighbours) < 2:
+        return False
+    if len(neighbours) == 2:
+        terms = list(_angle_terms(mol, bridge, neighbours, is_lambda1).values())
+        return bool(terms) and degrees(terms[0].theta0()) < max_angle
+    if len(neighbours) == 3:
+        flattening = _flattening_energy(mol, bridge, neighbours, is_lambda1)
+        return flattening is not None and flattening >= _MAX_PLANAR_FLATTENING
+    return True
 
 
 def _physical_state(mol, is_lambda1=False):

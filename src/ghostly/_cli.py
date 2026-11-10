@@ -182,7 +182,7 @@ def run():
         help="""
              Whether to replace rotamer anchor dihedrals with a stiff
              single-well cosine potential. When a bridge-physical bond is
-             rotatable (not in a ring, sp3 bridge), surviving anchor
+             rotatable (not in a ring, non-planar bridge), surviving anchor
              dihedrals can allow rotameric transitions of ghost atoms at
              intermediate lambda.
              """,
