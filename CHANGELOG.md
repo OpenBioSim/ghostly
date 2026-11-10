@@ -12,6 +12,7 @@ Changelog
 * Added support for Python 3.13 and 3.14, and dropped support for Python 3.10 and 3.11.
 * Fixed bond order perception for end states with ghost atoms attached, which could fail and leave every heavy atom typed as sp3, and decide triple junction planarity and ring membership from the end state angle terms and connectivity [#23](https://github.com/OpenBioSim/ghostly/pull/23).
 * Keep improper dihedrals that hold a single ghost in the plane of a ring bridge, since nothing else stops the ghost crossing the plane when the angles aren't stiffened, and remove the ``--stiffen-ring-bridges`` option [#23](https://github.com/OpenBioSim/ghostly/pull/23).
+* Always stiffen ghost angles at bridges that aren't in a ring, and remove the ``--stiffen-sp2-bridges`` option. Without impropers, the angle terms of an sp2 bridge don't hold a ghost in the plane, so skipping stiffening let it cross freely [#23](https://github.com/OpenBioSim/ghostly/pull/23).
 
 [2026.2.0](https://github.com/openbiosim/ghostly/compare/2026.1.0...2026.2.0) - Sep 2026
 ----------------------------------------------------------------------------------------

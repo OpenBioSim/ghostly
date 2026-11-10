@@ -184,9 +184,8 @@ def test_acetone_to_propenol():
     k_hard = 100
 
     # Apply the ghost atom modifications. Bridge atom 3 is sp2 (carbonyl
-    # carbon): explicitly enable sp2 stiffening to test the canonical Boresch
-    # planar triple junction behaviour.
-    new_mols, _ = modify(mols, k_hard=k_hard, stiffen_sp2_bridges=True)
+    # carbon), giving the canonical Boresch planar triple junction.
+    new_mols, _ = modify(mols, k_hard=k_hard)
 
     # Get the new angles and dihedrals.
     new_angles0 = new_mols[0].property("angle0")
@@ -402,9 +401,9 @@ def test_ejm49_to_ejm31():
 
     assert all(check_dihedral(info, new_dihedrals1.potentials(), *d) for d in anchor1)
 
-    # Bridge atom 17 is sp2 and not in a ring. With stiffen_sp2_bridges=False
-    # (the default), stiffening is skipped to avoid ~30° strain. Check that
-    # these angles are unchanged at both end states.
+    # Bridge atom 17 is sp2 and not in a ring. Its angle terms don't hold the
+    # ghost in the plane once the impropers are removed, so the
+    # physical-bridge-ghost angles are stiffened to 90 degrees at both end states.
     sp2_bridge_angles0 = [
         (AtomIdx(16), AtomIdx(17), AtomIdx(39)),
         (AtomIdx(18), AtomIdx(17), AtomIdx(39)),
@@ -414,46 +413,21 @@ def test_ejm49_to_ejm31():
         (AtomIdx(18), AtomIdx(17), AtomIdx(20)),
     ]
 
-    orig_angle_map0 = {
-        (
-            info.atom_idx(p.atom0()),
-            info.atom_idx(p.atom1()),
-            info.atom_idx(p.atom2()),
-        ): str(p.function())
-        for p in angles0.potentials()
-    }
-    new_angle_map0 = {
-        (
-            info.atom_idx(p.atom0()),
-            info.atom_idx(p.atom1()),
-            info.atom_idx(p.atom2()),
-        ): str(p.function())
-        for p in new_angles0.potentials()
-    }
-    orig_angle_map1 = {
-        (
-            info.atom_idx(p.atom0()),
-            info.atom_idx(p.atom1()),
-            info.atom_idx(p.atom2()),
-        ): str(p.function())
-        for p in angles1.potentials()
-    }
-    new_angle_map1 = {
-        (
-            info.atom_idx(p.atom0()),
-            info.atom_idx(p.atom1()),
-            info.atom_idx(p.atom2()),
-        ): str(p.function())
-        for p in new_angles1.potentials()
-    }
-
-    for angle_idx in sp2_bridge_angles0:
-        if angle_idx in orig_angle_map0 and angle_idx in new_angle_map0:
-            assert orig_angle_map0[angle_idx] == new_angle_map0[angle_idx]
-
-    for angle_idx in sp2_bridge_angles1:
-        if angle_idx in orig_angle_map1 and angle_idx in new_angle_map1:
-            assert orig_angle_map1[angle_idx] == new_angle_map1[angle_idx]
+    stiffened = "100 [theta - 1.5708]^2"
+    for new_angles, sp2_bridge_angles in (
+        (new_angles0, sp2_bridge_angles0),
+        (new_angles1, sp2_bridge_angles1),
+    ):
+        new_angle_map = {
+            (
+                info.atom_idx(p.atom0()),
+                info.atom_idx(p.atom1()),
+                info.atom_idx(p.atom2()),
+            ): str(p.function())
+            for p in new_angles.potentials()
+        }
+        for angle_idx in sp2_bridge_angles:
+            assert new_angle_map[angle_idx] == stiffened
 
     # Create improper IDs for the missing impropers at lambda = 0.
     missing_impropers0 = [
