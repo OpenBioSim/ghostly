@@ -1332,23 +1332,24 @@ def _triple(
         mod_key = "lambda_0"
         suffix = "0"
 
+    bridge_in_ring = _in_ring(physical_connectivity, bridge)
+
     # A bridge with four or more physical neighbours is never planar.
     if len(physical) > 3:
         is_planar = False
     else:
         flattening = _flattening_energy(mol, bridge, physical, is_lambda1)
         if flattening is None:
+            # Ring bridges keep their angles, as for any other ring bridge.
+            is_planar = bridge_in_ring
             _logger.warning(
                 f"Missing angle terms between the physical neighbours of bridge "
                 f"atom {bridge.value()} at {_lam_sym} = {int(is_lambda1)}. "
-                f"Defaulting to non-planar junction."
+                f"Defaulting to {'planar' if is_planar else 'non-planar'} junction."
             )
-            is_planar = False
         else:
             _logger.debug(f"  Flattening energy: {flattening:.3f} kcal/mol")
             is_planar = flattening < _MAX_PLANAR_FLATTENING
-
-    bridge_in_ring = _in_ring(physical_connectivity, bridge)
 
     # Score the physical neighbours.
     if bridge_indices is not None:
@@ -2234,36 +2235,44 @@ def _linearise_ring_break(
 
     linearised = set()
 
+    # Find ghost atoms with exactly 2 connections, both physical.
+    candidates = [
+        ghost
+        for ghost in ghosts
+        if len([n for n in connectivity.connections_to(ghost) if n not in ghost_set])
+        == 2
+    ]
+    if not candidates:
+        return mol, linearised
+
     try:
         rdmol, index = _to_rdkit_end_state(mol, not is_lambda1)
     except Exception as e:
         _logger.warning(
-            f"Skipping ring-break linearisation at {_lam_sym} = {int(is_lambda1)}, "
-            f"since chirality can't be checked: {e}"
+            f"Unable to check chirality at {_lam_sym} = {int(is_lambda1)}, so "
+            f"ring-break ghosts that could be stereocentres aren't linearised: {e}"
         )
-        return mol, linearised
-    for ghost in ghosts:
-        all_neighbors = list(connectivity.connections_to(ghost))
-        physical_neighbors = [n for n in all_neighbors if n not in ghost_set]
+        rdmol = None
+        physical_state = _create_connectivity(_physical_state(mol, is_lambda1))
 
-        # Find ghost atoms with exactly 2 connections, both physical.
-        if len(physical_neighbors) == 2:
-            # Check whether this atom is a chiral centre in the physical end
-            # state using RDKit. If so, linearising to 180° would destroy the
-            # geometry, so skip it and warn.
-            rdatom = rdmol.GetAtomWithIdx(index[ghost.value()])
-            chiral = rdatom.GetChiralTag()
-            if chiral in (
+    for ghost in candidates:
+        # Linearising a chiral centre in the physical end state to 180° would
+        # destroy its geometry. Without RDKit, skip any possible stereocentre.
+        if rdmol is None:
+            chiral = len(physical_state.connections_to(ghost)) >= 4
+        else:
+            chiral = rdmol.GetAtomWithIdx(index[ghost.value()]).GetChiralTag() in (
                 _ChiralType.CHI_TETRAHEDRAL_CW,
                 _ChiralType.CHI_TETRAHEDRAL_CCW,
-            ):
-                _logger.warning(
-                    f"  Ring-break ghost atom {ghost.value()} is a chiral "
-                    f"centre in the physical end state. Linearisation skipped "
-                    f"to preserve chirality."
-                )
-            else:
-                linearised.add(ghost)
+            )
+        if chiral:
+            _logger.warning(
+                f"  Ring-break ghost atom {ghost.value()} is a possible chiral "
+                f"centre in the physical end state. Linearisation skipped "
+                f"to preserve chirality."
+            )
+        else:
+            linearised.add(ghost)
 
     if not linearised:
         return mol, linearised
