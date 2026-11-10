@@ -955,28 +955,24 @@ def _dual(
         suffix = "0"
 
     # Check if the bridge atom is in a ring using RDKit.
-    if is_lambda1:
-        end_state_mol = _morph.link_to_perturbed(mol)
-    else:
-        end_state_mol = _morph.link_to_reference(mol)
-
-    from sire.convert import to_rdkit
-
     try:
-        rdmol = to_rdkit(end_state_mol)
-    except Exception:
-        rdmol = None
+        rdmol, index = _to_rdkit_end_state(mol, is_lambda1)
+        bridge_rdatom = rdmol.GetAtomWithIdx(index[bridge.value()])
+    except Exception as e:
+        _logger.warning(
+            f"Unable to check the ring membership and hybridisation of bridge "
+            f"atom {bridge.value()}: {e}"
+        )
+        bridge_rdatom = None
 
-    bridge_in_ring = (
-        rdmol is not None and rdmol.GetAtomWithIdx(bridge.value()).IsInRing()
-    )
+    bridge_in_ring = bridge_rdatom is not None and bridge_rdatom.IsInRing()
 
     # Check sp2 hybridisation for non-ring bridges.
     bridge_is_sp2 = False
-    if rdmol is not None and not bridge_in_ring:
+    if bridge_rdatom is not None and not bridge_in_ring:
         from rdkit.Chem.rdchem import HybridizationType
 
-        hyb = rdmol.GetAtomWithIdx(bridge.value()).GetHybridization()
+        hyb = bridge_rdatom.GetHybridization()
         bridge_is_sp2 = hyb == HybridizationType.SP2
 
     # Warn if sp2 stiffening is enabled: the ~30° strain from 90° vs natural
@@ -1375,29 +1371,25 @@ def _triple(
     # Store the molecular info.
     info = mol.info()
 
-    # Link the molecule to the desired end state.
     if is_lambda1:
-        end_state_mol = _morph.link_to_perturbed(mol)
         mod_key = "lambda_1"
         suffix = "1"
     else:
-        end_state_mol = _morph.link_to_reference(mol)
         mod_key = "lambda_0"
         suffix = "0"
 
     from rdkit.Chem import HybridizationType
-    from sire.convert import to_rdkit
 
     # Convert the molecule to RDKit to determine the hybridisation of the bridge atom.
     try:
-        rdmol = to_rdkit(end_state_mol)
+        rdmol, index = _to_rdkit_end_state(mol, is_lambda1)
     except Exception as e:
         msg = "Failed to convert molecule to RDKit for hybridisation check: " + str(e)
         _logger.error(msg)
         raise RuntimeError(msg)
 
     # Get the hybridisation and ring membership of the bridge atom.
-    bridge_rdatom = rdmol.GetAtomWithIdx(bridge.value())
+    bridge_rdatom = rdmol.GetAtomWithIdx(index[bridge.value()])
     hybridisation = bridge_rdatom.GetHybridization()
     bridge_in_ring = bridge_rdatom.IsInRing()
 
@@ -2270,11 +2262,9 @@ def _linearise_ring_break(
 
     # Build an RDKit molecule for the physical end state so we can query
     # chirality directly rather than inferring it from substituent counts.
-    from sire.convert import to_rdkit as _to_rdkit
     from rdkit.Chem import ChiralType as _ChiralType
 
-    phys_mol = _physical_state(mol, is_lambda1)
-    rdmol = _to_rdkit(phys_mol)
+    rdmol, index = _to_rdkit_end_state(mol, not is_lambda1)
 
     linearised = set()
     for ghost in ghosts:
@@ -2286,7 +2276,7 @@ def _linearise_ring_break(
             # Check whether this atom is a chiral centre in the physical end
             # state using RDKit. If so, linearising to 180° would destroy the
             # geometry, so skip it and warn.
-            rdatom = rdmol.GetAtomWithIdx(ghost.value())
+            rdatom = rdmol.GetAtomWithIdx(index[ghost.value()])
             chiral = rdatom.GetChiralTag()
             if chiral in (
                 _ChiralType.CHI_TETRAHEDRAL_CW,
@@ -2780,24 +2770,29 @@ def _find_rotatable_bonds(ref, bridges, physical, is_lambda1=False, warn=True):
         return rotatable_bonds
 
     from rdkit.Chem import HybridizationType
-    from sire.convert import to_rdkit
 
+    # The ghosts are physical at the opposite end state.
     try:
-        rdmol = to_rdkit(ref)
+        rdmol, index = _to_rdkit_end_state(ref, not is_lambda1)
     except Exception as e:
         _logger.warning(f"Failed to convert molecule to RDKit for rotamer check: {e}")
         return rotatable_bonds
+
+    connectivity = ref.property("connectivity")
 
     for bridge in bridges:
         for p in physical[bridge]:
             b_idx = bridge.value()
             p_idx = p.value()
 
-            rd_bond = rdmol.GetBondBetweenAtoms(p_idx, b_idx)
-            if rd_bond is None or rd_bond.IsInRing():
+            # Ring membership from the full connectivity, since the physical
+            # neighbour may be a ghost at the opposite end state.
+            if not connectivity.are_bonded(p, bridge) or connectivity.in_ring(
+                p, bridge
+            ):
                 continue
 
-            hybridisation = rdmol.GetAtomWithIdx(b_idx).GetHybridization()
+            hybridisation = rdmol.GetAtomWithIdx(index[b_idx]).GetHybridization()
 
             if hybridisation in (
                 HybridizationType.SP3,
@@ -2814,6 +2809,42 @@ def _find_rotatable_bonds(ref, bridges, physical, is_lambda1=False, warn=True):
                     )
 
     return rotatable_bonds
+
+
+def _to_rdkit_end_state(mol, is_lambda1=False):
+    """
+    Return an RDKit molecule for one end state of a perturbable molecule, without
+    that end state's ghost atoms, and a dictionary mapping atom index values in
+    'mol' to atom indices in the RDKit molecule. Ghost atoms are removed since
+    their bonds can exceed the valence of the atoms they attach to, which stops
+    RDKit perceiving bond orders, aromaticity and hybridisation.
+    """
+    from sire.convert import to_rdkit
+
+    suffix = "1" if is_lambda1 else "0"
+    physical = [
+        i
+        for i, element in enumerate(mol.property(f"element{suffix}"))
+        if element.num_protons() > 0
+    ]
+
+    if is_lambda1:
+        state = _morph.extract_perturbed(mol)
+    else:
+        state = _morph.extract_reference(mol)
+
+    rdmol = to_rdkit(state)
+
+    # Atoms are left with unpaired electrons if bond orders couldn't be inferred.
+    if rdmol.GetNumAtoms() != len(physical) or any(
+        atom.GetNumRadicalElectrons() > 0 for atom in rdmol.GetAtoms()
+    ):
+        raise RuntimeError(
+            f"RDKit couldn't perceive the bond orders of the molecule at "
+            f"{_lam_sym} = {int(is_lambda1)}"
+        )
+
+    return rdmol, {index: i for i, index in enumerate(physical)}
 
 
 def _physical_state(mol, is_lambda1=False):
