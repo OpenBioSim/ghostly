@@ -45,6 +45,9 @@ except (UnicodeEncodeError, LookupError):
 
 del _sys
 
+# Triple junctions needing more than this energy (kcal/mol) to flatten are non-planar.
+_MAX_PLANAR_FLATTENING = 2.0
+
 
 def modify(
     system,
@@ -954,26 +957,22 @@ def _dual(
         mod_key = "lambda_0"
         suffix = "0"
 
-    # Check if the bridge atom is in a ring using RDKit.
-    try:
-        rdmol, index = _to_rdkit_end_state(mol, is_lambda1)
-        bridge_rdatom = rdmol.GetAtomWithIdx(index[bridge.value()])
-    except Exception as e:
-        _logger.warning(
-            f"Unable to check the ring membership and hybridisation of bridge "
-            f"atom {bridge.value()}: {e}"
-        )
-        bridge_rdatom = None
+    bridge_in_ring = connectivity.in_ring(bridge)
 
-    bridge_in_ring = bridge_rdatom is not None and bridge_rdatom.IsInRing()
-
-    # Check sp2 hybridisation for non-ring bridges.
+    # Check sp2 hybridisation for non-ring bridges using RDKit.
     bridge_is_sp2 = False
-    if bridge_rdatom is not None and not bridge_in_ring:
+    if not bridge_in_ring:
         from rdkit.Chem.rdchem import HybridizationType
 
-        hyb = _hybridisation(bridge_rdatom)
-        bridge_is_sp2 = hyb == HybridizationType.SP2
+        try:
+            rdmol, index = _to_rdkit_end_state(mol, is_lambda1)
+            hyb = _hybridisation(rdmol.GetAtomWithIdx(index[bridge.value()]))
+            bridge_is_sp2 = hyb == HybridizationType.SP2
+        except Exception as e:
+            _logger.warning(
+                f"Unable to check the hybridisation of bridge atom "
+                f"{bridge.value()}: {e}"
+            )
 
     # Warn if sp2 stiffening is enabled: the ~30° strain from 90° vs natural
     # ~120° may cause instabilities or free energy bias.
@@ -1378,30 +1377,28 @@ def _triple(
         mod_key = "lambda_0"
         suffix = "0"
 
-    from rdkit.Chem import HybridizationType
+    # The junction is planar if the angle terms between the physical neighbours
+    # of the bridge atom allow them to flatten at thermal energies. Higher order
+    # junctions pass four or more physical neighbours, so are never planar.
+    if len(physical) > 3:
+        is_planar = False
+    else:
+        flattening = _flattening_energy(mol, bridge, physical, is_lambda1)
+        if flattening is None:
+            _logger.warning(
+                f"Missing angle terms between the physical neighbours of bridge "
+                f"atom {bridge.value()} at {_lam_sym} = {int(is_lambda1)}. "
+                f"Defaulting to planar junction."
+            )
+            is_planar = True
+        else:
+            _logger.debug(f"  Flattening energy: {flattening:.3f} kcal/mol")
+            is_planar = flattening < _MAX_PLANAR_FLATTENING
 
-    # Convert the molecule to RDKit to determine the hybridisation of the bridge atom.
-    try:
-        rdmol, index = _to_rdkit_end_state(mol, is_lambda1)
-    except Exception as e:
-        msg = "Failed to convert molecule to RDKit for hybridisation check: " + str(e)
-        _logger.error(msg)
-        raise RuntimeError(msg)
-
-    # Get the hybridisation and ring membership of the bridge atom.
-    bridge_rdatom = rdmol.GetAtomWithIdx(index[bridge.value()])
-    hybridisation = _hybridisation(bridge_rdatom)
-    bridge_in_ring = bridge_rdatom.IsInRing()
+    bridge_in_ring = connectivity.in_ring(bridge)
 
     # sp2 status for non-ring bridges (ring bridges use bridge_in_ring).
-    bridge_is_sp2 = not bridge_in_ring and hybridisation == HybridizationType.SP2
-
-    # Warn if the hybridisation is unspecified.
-    if hybridisation in (HybridizationType.UNSPECIFIED, HybridizationType.OTHER):
-        _logger.warning(
-            f"Unspecified hybridisation for bridge atom {bridge.value()} "
-            f"at {_lam_sym} = {int(is_lambda1)}. Defaulting to planar junction."
-        )
+    bridge_is_sp2 = is_planar and not bridge_in_ring
 
     # Score the physical neighbours.
     if bridge_indices is not None:
@@ -1421,11 +1418,7 @@ def _triple(
         heavy_phys = set(physical)
 
     # Non-planar junction.
-    if hybridisation in (
-        HybridizationType.SP3,
-        HybridizationType.SP3D,
-        HybridizationType.SP3D2,
-    ):
+    if not is_planar:
         _logger.debug("  Non-planar junction.")
 
         # First, modify the force constants of the angle terms between the ghost
@@ -2778,14 +2771,14 @@ def _find_rotatable_bonds(ref, bridges, physical, is_lambda1=False, warn=True):
         _logger.warning(f"Failed to convert molecule to RDKit for rotamer check: {e}")
         return rotatable_bonds
 
-    connectivity = ref.property("connectivity")
+    connectivity = _end_state_connectivity(ref, is_lambda1)
 
     for bridge in bridges:
         for p in physical[bridge]:
             b_idx = bridge.value()
             p_idx = p.value()
 
-            # Ring membership from the full connectivity, since the physical
+            # Ring membership from the connectivity, since the physical
             # neighbour may be a ghost at the opposite end state.
             if not connectivity.are_bonded(p, bridge) or connectivity.in_ring(
                 p, bridge
@@ -2845,6 +2838,52 @@ def _to_rdkit_end_state(mol, is_lambda1=False):
         )
 
     return rdmol, {index: i for i, index in enumerate(physical)}
+
+
+def _end_state_connectivity(mol, is_lambda1=False):
+    """
+    Return the connectivity of a perturbable molecule at an end state, including
+    the bonds to ghost atoms. Only ring-breaking molecules have end state
+    connectivities that differ.
+    """
+    key = "connectivity1" if is_lambda1 else "connectivity0"
+    if mol.has_property(key):
+        return mol.property(key)
+    return mol.property("connectivity")
+
+
+def _flattening_energy(mol, bridge, atoms, is_lambda1=False):
+    """
+    Return the energy in kcal/mol needed to make the bridge atom and three of
+    its neighbours planar, starting from the minimum of the angle terms between
+    them, or None if any of those angle terms is missing.
+    """
+    from math import pi
+
+    from sire.legacy.CAS import Symbol
+
+    theta = Symbol("theta")
+    info = mol.info()
+    suffix = "1" if is_lambda1 else "0"
+    neighbours = {atom.value() for atom in atoms}
+
+    terms = {}
+    for p in mol.property("angle" + suffix).potentials():
+        idx0 = info.atom_idx(p.atom0()).value()
+        idx1 = info.atom_idx(p.atom1()).value()
+        idx2 = info.atom_idx(p.atom2()).value()
+        if idx1 == bridge.value() and idx0 != idx2 and {idx0, idx2} <= neighbours:
+            terms[frozenset((idx0, idx2))] = _SireMM.AmberAngle(p.function(), theta)
+
+    if len(terms) != 3:
+        return None
+
+    # A planar centre needs angles summing to 2 pi. Minimising the harmonic
+    # energy subject to that constraint gives shortfall^2 / sum(1 / k).
+    if any(term.k() <= 0 for term in terms.values()):
+        return 0.0
+    shortfall = max(0.0, 2 * pi - sum(term.theta0() for term in terms.values()))
+    return shortfall**2 / sum(1 / term.k() for term in terms.values())
 
 
 def _hybridisation(rdatom):
