@@ -124,10 +124,8 @@ def test_toluene_to_pyridine():
         for dihedral in missing_dihedrals
     )
 
-    # Bridge atom 1 is in an aromatic ring, so no stiffening is applied. Its
-    # improper holds the ghost in the plane of the ring, and the rigid ring
-    # keeps the coupling acceptable (Boresch et al.). The angles involving the
-    # ring-bridge ghost should be unchanged.
+    # Bridge atom 1 is in an aromatic ring, so the angles involving its ghost
+    # are unchanged and its improper is kept.
     ring_bridge_angles = [
         (AtomIdx(0), AtomIdx(1), AtomIdx(2)),
         (AtomIdx(0), AtomIdx(1), AtomIdx(6)),
@@ -401,9 +399,8 @@ def test_ejm49_to_ejm31():
 
     assert all(check_dihedral(info, new_dihedrals1.potentials(), *d) for d in anchor1)
 
-    # Bridge atom 17 is sp2 and not in a ring. Its angle terms don't hold the
-    # ghost in the plane once the impropers are removed, so the
-    # physical-bridge-ghost angles are stiffened to 90 degrees at both end states.
+    # Bridge atom 17 is sp2 and not in a ring, so its physical-bridge-ghost
+    # angles are stiffened to 90 degrees at both end states.
     sp2_bridge_angles0 = [
         (AtomIdx(16), AtomIdx(17), AtomIdx(39)),
         (AtomIdx(18), AtomIdx(17), AtomIdx(39)),

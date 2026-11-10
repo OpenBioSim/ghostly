@@ -1027,9 +1027,7 @@ def _dual(
                 # Identify the physical atom in this angle.
                 phys_atom = idx2 if idx0 in ghosts else idx0
 
-                # Ring bridges keep their ghost impropers, which hold the ghost
-                # in the plane. The rigid ring keeps the redundant coupling
-                # acceptable (Boresch et al.), so the angles are not stiffened.
+                # Ring bridge impropers hold the ghost in the plane, so don't stiffen.
                 if bridge_in_ring:
                     new_angles.set(idx0, idx1, idx2, p.function())
                     _logger.debug(
@@ -1317,9 +1315,7 @@ def _triple(
         mod_key = "lambda_0"
         suffix = "0"
 
-    # The junction is planar if the angle terms between the physical neighbours
-    # of the bridge atom allow them to flatten at thermal energies. Higher order
-    # junctions pass four or more physical neighbours, so are never planar.
+    # A bridge with four or more physical neighbours is never planar.
     if len(physical) > 3:
         is_planar = False
     else:
@@ -1328,9 +1324,9 @@ def _triple(
             _logger.warning(
                 f"Missing angle terms between the physical neighbours of bridge "
                 f"atom {bridge.value()} at {_lam_sym} = {int(is_lambda1)}. "
-                f"Defaulting to planar junction."
+                f"Defaulting to non-planar junction."
             )
-            is_planar = True
+            is_planar = False
         else:
             _logger.debug(f"  Flattening energy: {flattening:.3f} kcal/mol")
             is_planar = flattening < _MAX_PLANAR_FLATTENING
@@ -1634,9 +1630,7 @@ def _triple(
             idxs = [idx0, idx1, idx2]
 
             if idx in idxs and any([x in ghosts for x in idxs]):
-                # Ring bridges aren't stiffened, so preserve all ghost-containing
-                # angles at their original values rather than removing the
-                # sacrificial one.
+                # Ring bridges aren't stiffened, so keep the sacrificial angle.
                 if bridge_in_ring:
                     new_angles.set(idx0, idx1, idx2, p.function())
                     _logger.debug(
@@ -2214,9 +2208,16 @@ def _linearise_ring_break(
     # chirality directly rather than inferring it from substituent counts.
     from rdkit.Chem import ChiralType as _ChiralType
 
-    rdmol, index = _to_rdkit_end_state(mol, not is_lambda1)
-
     linearised = set()
+
+    try:
+        rdmol, index = _to_rdkit_end_state(mol, not is_lambda1)
+    except Exception as e:
+        _logger.warning(
+            f"Skipping ring-break linearisation at {_lam_sym} = {int(is_lambda1)}, "
+            f"since chirality can't be checked: {e}"
+        )
+        return mol, linearised
     for ghost in ghosts:
         all_neighbors = list(connectivity.connections_to(ghost))
         physical_neighbors = [n for n in all_neighbors if n not in ghost_set]
