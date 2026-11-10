@@ -992,23 +992,20 @@ def test_is_rotor():
 
 def test_in_ring():
     """
-    Test ring detection, including macrocycles that Sire's in_ring misses.
+    Test ring detection, including macrocycles.
     """
 
     from sire.legacy.Mol import AtomIdx
 
-    from ghostly._ghostly import _in_ring
-
     connectivity = sr.smiles("C1CCCCCCCCCCCCC1").property("connectivity")
-    assert not connectivity.in_ring(AtomIdx(0))
-    assert _in_ring(connectivity, AtomIdx(0))
-    assert _in_ring(connectivity, AtomIdx(0), AtomIdx(1))
+    assert connectivity.in_ring(AtomIdx(0))
+    assert connectivity.in_ring(AtomIdx(0), AtomIdx(1))
 
     mol = sr.smiles("C1CCCCC1CC")
     connectivity = mol.property("connectivity")
-    assert _in_ring(connectivity, AtomIdx(0))
-    assert not _in_ring(connectivity, AtomIdx(mol.num_atoms() - 1))
-    assert not _in_ring(connectivity, AtomIdx(5), AtomIdx(6))
+    assert connectivity.in_ring(AtomIdx(0))
+    assert not connectivity.in_ring(AtomIdx(mol.num_atoms() - 1))
+    assert not connectivity.in_ring(AtomIdx(5), AtomIdx(6))
 
 
 def test_physical_connectivity_ring():
@@ -1019,7 +1016,7 @@ def test_physical_connectivity_ring():
     import sire.morph as morph
     from sire.legacy.Mol import AtomIdx
 
-    from ghostly._ghostly import _create_connectivity, _in_ring, _physical_connectivity
+    from ghostly._ghostly import _create_connectivity, _physical_connectivity
 
     # Toluene to pyridine: at lambda = 1 the methyl carbon is a ghost bonded to
     # the ring, which stays a ring once the bonds to ghosts are removed.
@@ -1032,7 +1029,7 @@ def test_physical_connectivity_ring():
     ]
     physical = _physical_connectivity(mol, connectivity, ghosts)
     assert not physical.are_bonded(AtomIdx(0), AtomIdx(1))
-    assert _in_ring(physical, AtomIdx(1))
+    assert physical.in_ring(AtomIdx(1))
 
 
 def test_to_rdkit_end_state():
@@ -1068,15 +1065,15 @@ def test_ring_closed_by_ghosts():
 
     from sire.legacy.Mol import AtomIdx
 
-    from ghostly._ghostly import _in_ring, _physical_connectivity
+    from ghostly._ghostly import _physical_connectivity
 
     mol = sr.smiles("C1CCCCC1")
     connectivity = mol.property("connectivity")
     physical = _physical_connectivity(mol, connectivity, [AtomIdx(2), AtomIdx(3)])
 
-    assert _in_ring(connectivity, AtomIdx(0))
-    assert not _in_ring(physical, AtomIdx(0))
-    assert not _in_ring(physical, AtomIdx(0), AtomIdx(1))
+    assert connectivity.in_ring(AtomIdx(0))
+    assert not physical.in_ring(AtomIdx(0))
+    assert not physical.in_ring(AtomIdx(0), AtomIdx(1))
 
 
 def test_linearise_ring_break_without_chirality(monkeypatch):

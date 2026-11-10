@@ -956,7 +956,7 @@ def _dual(
         mod_key = "lambda_0"
         suffix = "0"
 
-    bridge_in_ring = _in_ring(physical_connectivity, bridge)
+    bridge_in_ring = physical_connectivity.in_ring(bridge)
 
     # Score the physical neighbours.
     if bridge_indices is not None:
@@ -1332,7 +1332,7 @@ def _triple(
         mod_key = "lambda_0"
         suffix = "0"
 
-    bridge_in_ring = _in_ring(physical_connectivity, bridge)
+    bridge_in_ring = physical_connectivity.in_ring(bridge)
 
     # A bridge with four or more physical neighbours is never planar.
     if len(physical) > 3:
@@ -1990,7 +1990,7 @@ def _remove_impropers(
             num_ghosts == 1
             and centre is not None
             and centre not in ghosts
-            and _in_ring(physical_connectivity, centre)
+            and physical_connectivity.in_ring(centre)
         )
 
         # Remove any improper dihedrals that bridge the ghost and physical systems.
@@ -2778,8 +2778,8 @@ def _find_rotatable_bonds(
         for p in physical[bridge]:
             # Ring membership from the connectivity, since the physical
             # neighbour may be a ghost at the opposite end state.
-            if not connectivity.are_bonded(p, bridge) or _in_ring(
-                connectivity, p, bridge
+            if not connectivity.are_bonded(p, bridge) or connectivity.in_ring(
+                p, bridge
             ):
                 continue
 
@@ -2844,32 +2844,6 @@ def _physical_connectivity(mol, connectivity, ghosts):
         if idx0 not in ghosts and idx1 not in ghosts:
             physical.connect(idx0, idx1)
     return physical.commit()
-
-
-def _in_ring(connectivity, atom0, atom1=None):
-    """
-    Return whether an atom, or the bond between two bonded atoms, is in a ring.
-    A bond is in a ring if its atoms stay connected once it is removed.
-    """
-    if atom1 is None:
-        return any(
-            _in_ring(connectivity, atom0, other)
-            for other in connectivity.connections_to(atom0)
-        )
-
-    seen = {atom0}
-    queue = [atom0]
-    while queue:
-        atom = queue.pop()
-        for other in connectivity.connections_to(atom):
-            if atom == atom0 and other == atom1:
-                continue
-            if other == atom1:
-                return True
-            if other not in seen:
-                seen.add(other)
-                queue.append(other)
-    return False
 
 
 def _angle_terms(mol, bridge, atoms, is_lambda1=False):
