@@ -972,7 +972,7 @@ def _dual(
     if bridge_rdatom is not None and not bridge_in_ring:
         from rdkit.Chem.rdchem import HybridizationType
 
-        hyb = bridge_rdatom.GetHybridization()
+        hyb = _hybridisation(bridge_rdatom)
         bridge_is_sp2 = hyb == HybridizationType.SP2
 
     # Warn if sp2 stiffening is enabled: the ~30° strain from 90° vs natural
@@ -1390,7 +1390,7 @@ def _triple(
 
     # Get the hybridisation and ring membership of the bridge atom.
     bridge_rdatom = rdmol.GetAtomWithIdx(index[bridge.value()])
-    hybridisation = bridge_rdatom.GetHybridization()
+    hybridisation = _hybridisation(bridge_rdatom)
     bridge_in_ring = bridge_rdatom.IsInRing()
 
     # sp2 status for non-ring bridges (ring bridges use bridge_in_ring).
@@ -2792,7 +2792,7 @@ def _find_rotatable_bonds(ref, bridges, physical, is_lambda1=False, warn=True):
             ):
                 continue
 
-            hybridisation = rdmol.GetAtomWithIdx(index[b_idx]).GetHybridization()
+            hybridisation = _hybridisation(rdmol.GetAtomWithIdx(index[b_idx]))
 
             if hybridisation in (
                 HybridizationType.SP3,
@@ -2845,6 +2845,23 @@ def _to_rdkit_end_state(mol, is_lambda1=False):
         )
 
     return rdmol, {index: i for i, index in enumerate(physical)}
+
+
+def _hybridisation(rdatom):
+    """
+    Return the hybridisation of an RDKit atom, treating sp2 atoms without a
+    double or aromatic bond, i.e. conjugated lone pairs, as sp3.
+    """
+    from rdkit.Chem import BondType, HybridizationType
+
+    hybridisation = rdatom.GetHybridization()
+    if hybridisation == HybridizationType.SP2 and not any(
+        bond.GetIsAromatic()
+        or bond.GetBondType() in (BondType.DOUBLE, BondType.AROMATIC)
+        for bond in rdatom.GetBonds()
+    ):
+        return HybridizationType.SP3
+    return hybridisation
 
 
 def _physical_state(mol, is_lambda1=False):
