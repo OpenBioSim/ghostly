@@ -124,10 +124,10 @@ def test_toluene_to_pyridine():
         for dihedral in missing_dihedrals
     )
 
-    # Bridge atom 1 is in an aromatic ring. Boresch notes that for rigid ring
-    # systems the coupling is acceptable, and the ring geometry already
-    # constrains the ghost position, so no stiffening is applied. The angles
-    # involving the ring-bridge ghost should be unchanged.
+    # Bridge atom 1 is in an aromatic ring, so no stiffening is applied. Its
+    # improper holds the ghost in the plane of the ring, and the rigid ring
+    # keeps the coupling acceptable (Boresch et al.). The angles involving the
+    # ring-bridge ghost should be unchanged.
     ring_bridge_angles = [
         (AtomIdx(0), AtomIdx(1), AtomIdx(2)),
         (AtomIdx(0), AtomIdx(1), AtomIdx(6)),
@@ -153,6 +153,15 @@ def test_toluene_to_pyridine():
     for angle_idx in ring_bridge_angles:
         if angle_idx in orig_angle_map and angle_idx in new_angle_map:
             assert orig_angle_map[angle_idx] == new_angle_map[angle_idx]
+
+    # The improper centred on the ring bridge with the ghost should be kept.
+    ring_bridge_improper = (AtomIdx(0), AtomIdx(1), AtomIdx(6), AtomIdx(2))
+    assert check_improper(
+        info, mols[0].property("improper1").potentials(), *ring_bridge_improper
+    )
+    assert check_improper(
+        info, new_mols[0].property("improper1").potentials(), *ring_bridge_improper
+    )
 
 
 def test_acetone_to_propenol():

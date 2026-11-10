@@ -60,7 +60,6 @@ def modify(
     k_single_well=5,
     stiffen_rotamers=False,
     k_rotamer=50,
-    stiffen_ring_bridges=False,
     stiffen_sp2_bridges=False,
     linearise_ring_break=False,
     force=False,
@@ -154,13 +153,6 @@ def modify(
         rotamer anchor dihedrals (in kcal/mol). The resulting barrier height
         is ``2 * k_rotamer``. Only used when ``stiffen_rotamers`` is True.
 
-    stiffen_ring_bridges : bool, optional
-        Whether to apply 90° angle stiffening when the bridge atom is in a
-        ring. Boresch notes that for rigid ring systems the partition function
-        coupling is small and acceptable, so stiffening is skipped by default
-        (False). Enabling this restores the original behaviour but introduces
-        strain where the 90° target fights the natural ring geometry.
-
     stiffen_sp2_bridges : bool, optional
         Whether to apply 90° angle stiffening when the bridge atom is sp2 and
         not in a ring (e.g. carbonyl or alkene carbons). The natural angle is
@@ -242,7 +234,6 @@ def modify(
         "k_single_well": k_single_well,
         "stiffen_rotamers": stiffen_rotamers,
         "k_rotamer": k_rotamer,
-        "stiffen_ring_bridges": stiffen_ring_bridges,
         "stiffen_sp2_bridges": stiffen_sp2_bridges,
         "linearise_ring_break": linearise_ring_break,
     }
@@ -426,7 +417,6 @@ def modify(
                     modifications,
                     k_hard=k_hard,
                     bridge_indices=bridge_indices0,
-                    stiffen_ring_bridges=stiffen_ring_bridges,
                     stiffen_sp2_bridges=stiffen_sp2_bridges,
                 )
 
@@ -444,7 +434,6 @@ def modify(
                     optimise_angles=optimise_angles,
                     num_optimise=num_optimise,
                     bridge_indices=bridge_indices0,
-                    stiffen_ring_bridges=stiffen_ring_bridges,
                     stiffen_sp2_bridges=stiffen_sp2_bridges,
                 )
 
@@ -534,7 +523,6 @@ def modify(
                     k_hard=k_hard,
                     is_lambda1=True,
                     bridge_indices=bridge_indices1,
-                    stiffen_ring_bridges=stiffen_ring_bridges,
                     stiffen_sp2_bridges=stiffen_sp2_bridges,
                 )
 
@@ -552,7 +540,6 @@ def modify(
                     num_optimise=num_optimise,
                     is_lambda1=True,
                     bridge_indices=bridge_indices1,
-                    stiffen_ring_bridges=stiffen_ring_bridges,
                     stiffen_sp2_bridges=stiffen_sp2_bridges,
                 )
 
@@ -881,7 +868,6 @@ def _dual(
     k_hard=100,
     is_lambda1=False,
     bridge_indices=None,
-    stiffen_ring_bridges=False,
     stiffen_sp2_bridges=False,
 ):
     r"""
@@ -1068,11 +1054,10 @@ def _dual(
                 # Identify the physical atom in this angle.
                 phys_atom = idx2 if idx0 in ghosts else idx0
 
-                # Ring bridges: the ring geometry already constrains the ghost
-                # position and prevents flapping (Boresch et al. note this is
-                # "acceptable if the physical molecule is a rigid ring system").
-                # Stiffening to 90° would introduce strain without benefit.
-                if bridge_in_ring and not stiffen_ring_bridges:
+                # Ring bridges keep their ghost impropers, which hold the ghost
+                # in the plane. The rigid ring keeps the redundant coupling
+                # acceptable (Boresch et al.), so the angles are not stiffened.
+                if bridge_in_ring:
                     new_angles.set(idx0, idx1, idx2, p.function())
                     _logger.debug(
                         f"  Skipping stiffening for angle "
@@ -1164,7 +1149,7 @@ def _dual(
         # The ghosts only sit on the normal of the physical plane if every
         # physical-bridge-ghost angle is stiffened. The single-branch handler
         # skips poorly-scoring physical atoms, so mirror that check here.
-        if bridge_in_ring and not stiffen_ring_bridges:
+        if bridge_in_ring:
             preserve_reason = "is in a ring"
         elif bridge_is_sp2 and not stiffen_sp2_bridges:
             preserve_reason = "is sp2"
@@ -1267,7 +1252,6 @@ def _dual(
                 k_hard=k_hard,
                 is_lambda1=is_lambda1,
                 bridge_indices=bridge_indices,
-                stiffen_ring_bridges=stiffen_ring_bridges,
                 stiffen_sp2_bridges=stiffen_sp2_bridges,
             )
 
@@ -1288,7 +1272,6 @@ def _triple(
     num_optimise=10,
     is_lambda1=False,
     bridge_indices=None,
-    stiffen_ring_bridges=False,
     stiffen_sp2_bridges=False,
 ):
     r"""
@@ -1698,9 +1681,7 @@ def _triple(
                 # When stiffening is skipped for ring/sp2 bridges, preserve all
                 # ghost-containing angles at their original values rather than
                 # removing the sacrificial one.
-                if (bridge_in_ring and not stiffen_ring_bridges) or (
-                    bridge_is_sp2 and not stiffen_sp2_bridges
-                ):
+                if bridge_in_ring or (bridge_is_sp2 and not stiffen_sp2_bridges):
                     new_angles.set(idx0, idx1, idx2, p.function())
                     _logger.debug(
                         f"  Preserving angle "
@@ -1760,7 +1741,6 @@ def _triple(
             k_hard=k_hard,
             is_lambda1=is_lambda1,
             bridge_indices=bridge_indices,
-            stiffen_ring_bridges=stiffen_ring_bridges,
             stiffen_sp2_bridges=stiffen_sp2_bridges,
         )
 
@@ -1970,7 +1950,9 @@ def _higher(
 
 def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
     """
-    Remove improper dihedral terms that bridge the ghost and physical systems.
+    Remove improper dihedral terms that bridge the ghost and physical systems,
+    other than those centred on a physical ring atom with a single ghost. These
+    hold the ghost in the plane of a ring bridge, which is not stiffened.
 
     Parameters
     ----------
@@ -2008,17 +1990,35 @@ def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
     # Initialise a container to store the updated bonded terms.
     new_impropers = _SireMM.FourAtomFunctions(mol.info())
 
+    connectivity = _end_state_connectivity(mol, is_lambda1)
+
     # Loop over the improper dihedrals.
     for p in impropers.potentials():
         idx0 = info.atom_idx(p.atom0())
         idx1 = info.atom_idx(p.atom1())
         idx2 = info.atom_idx(p.atom2())
         idx3 = info.atom_idx(p.atom3())
+        idxs = (idx0, idx1, idx2, idx3)
+        num_ghosts = sum(idx in ghosts for idx in idxs)
+
+        # The central atom is bonded to the other three.
+        centre = next(
+            (
+                idx
+                for idx in idxs
+                if all(connectivity.are_bonded(idx, x) for x in idxs if x != idx)
+            ),
+            None,
+        )
+        ring_bridge = (
+            num_ghosts == 1
+            and centre is not None
+            and centre not in ghosts
+            and connectivity.in_ring(centre)
+        )
 
         # Remove any improper dihedrals that bridge the ghost and physical systems.
-        if not all(idx in ghosts for idx in (idx0, idx1, idx2, idx3)) and any(
-            idx in ghosts for idx in (idx0, idx1, idx2, idx3)
-        ):
+        if 0 < num_ghosts < len(idxs) and not ring_bridge:
             _logger.debug(
                 f"  Removing improper dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
             )

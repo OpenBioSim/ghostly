@@ -28,12 +28,13 @@ handle the diversity of perturbations encountered in practice:
 
 - **Anchor selection scoring:** physical anchor atoms are scored to avoid
   transmuting or bridge atoms, preventing geometrically inconsistent constraints.
-- **Ring and sp2 bridge handling:** angle stiffening is skipped by default for
-  ring and sp2 bridges, where local geometry already constrains the ghost and
-  90° stiffening would introduce significant strain. It can be re-enabled via
-  `--stiffen-ring-bridges` and `--stiffen-sp2-bridges`.
+- **Ring and sp2 bridge handling:** ring bridges are not stiffened. Instead,
+  their improper dihedrals with a single ghost are kept, holding the ghost in
+  the plane of the ring, where the rigid ring keeps the coupling acceptable.
+  Angle stiffening is skipped by default for sp2 bridges, and can be enabled
+  via `--stiffen-sp2-bridges`.
 - **Residual term cleanup:** a post-processing pass removes mixed improper
-  dihedrals and cross-bridge dihedrals missed by the per-bridge junction
+  dihedrals (other than those at ring bridges) and cross-bridge dihedrals missed by the per-bridge junction
   handlers, as well as angles where a ghost atom is the central atom and both
   terminal atoms are physical.
 - **Mixed dihedral softening:** surviving mixed ghost/physical dihedrals can

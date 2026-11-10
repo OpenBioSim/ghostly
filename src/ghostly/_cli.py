@@ -203,20 +203,6 @@ def run():
     )
 
     parser.add_argument(
-        "--stiffen-ring-bridges",
-        action="store_true",
-        help="""
-             Apply 90 degree angle stiffening when the bridge atom is in a
-             ring. By default this is skipped since the ring geometry already
-             constrains the ghost position and stiffening introduces strain.
-             A warning is logged when this is enabled and a ring bridge is
-             detected.
-             """,
-        default=False,
-        required=False,
-    )
-
-    parser.add_argument(
         "--stiffen-sp2-bridges",
         action="store_true",
         help="""
@@ -434,7 +420,6 @@ def run():
             k_single_well=k_single_well.value(),
             stiffen_rotamers=args.stiffen_rotamers,
             k_rotamer=k_rotamer.value(),
-            stiffen_ring_bridges=args.stiffen_ring_bridges,
             stiffen_sp2_bridges=args.stiffen_sp2_bridges,
             linearise_ring_break=args.linearise_ring_break,
             force=args.force,
