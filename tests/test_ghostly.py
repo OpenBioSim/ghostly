@@ -934,6 +934,146 @@ def test_single_well_skips_reference_ghost():
     assert _single_well(ref, idxs, 5, {AtomIdx(1)}) is None
 
 
+def test_flattening_energy():
+    """
+    Test the energy needed to flatten a bridge atom and three of its neighbours.
+    """
+
+    import sire.morph as morph
+    from sire.legacy.Mol import AtomIdx
+
+    from ghostly._ghostly import (
+        _MAX_PLANAR_FLATTENING,
+        _create_connectivity,
+        _flattening_energy,
+    )
+
+    # An aromatic carbon in toluene is planar.
+    mol = sr.load_test_files("tol2pyr.s3")[0]
+    atoms = [AtomIdx(0), AtomIdx(2), AtomIdx(6)]
+    assert _flattening_energy(mol, AtomIdx(1), atoms) < 0.01
+
+    # An sp3 carbon in hexane is not.
+    mol = sr.load_test_files("hex2prp.s3")[0]
+    connectivity = _create_connectivity(morph.link_to_reference(mol))
+    neighbours = list(connectivity.connections_to(AtomIdx(1)))
+    assert _flattening_energy(mol, AtomIdx(1), neighbours[:3]) > _MAX_PLANAR_FLATTENING
+
+    # There is no energy without three angle terms.
+    assert _flattening_energy(mol, AtomIdx(1), neighbours[:2]) is None
+
+
+def test_is_rotor():
+    """
+    Test whether bridge atoms are rotors, i.e. neither planar nor linear.
+    """
+
+    import sire.morph as morph
+    from sire.legacy.Mol import AtomIdx
+
+    from ghostly._ghostly import _create_connectivity, _is_rotor
+
+    # Four neighbours: an sp3 carbon in hexane.
+    mol = sr.load_test_files("hex2prp.s3")[0]
+    connectivity = _create_connectivity(morph.link_to_reference(mol))
+    assert _is_rotor(mol, AtomIdx(1), connectivity)
+
+    # Three planar neighbours: the carbonyl carbon in acetone.
+    mol = sr.load_test_files("acepol.s3")[0]
+    connectivity0 = _create_connectivity(morph.link_to_reference(mol))
+    assert not _is_rotor(mol, AtomIdx(1), connectivity0)
+
+    # Two neighbours: the hydroxyl oxygen in propenol, which is bent at about
+    # 108 degrees, so only counts as linear with a lower threshold.
+    connectivity1 = _create_connectivity(morph.link_to_perturbed(mol))
+    assert _is_rotor(mol, AtomIdx(9), connectivity1, is_lambda1=True)
+    assert not _is_rotor(mol, AtomIdx(9), connectivity1, is_lambda1=True, max_angle=100)
+
+
+def test_in_ring():
+    """
+    Test ring detection, including macrocycles that Sire's in_ring misses.
+    """
+
+    from sire.legacy.Mol import AtomIdx
+
+    from ghostly._ghostly import _in_ring
+
+    connectivity = sr.smiles("C1CCCCCCCCCCCCC1").property("connectivity")
+    assert not connectivity.in_ring(AtomIdx(0))
+    assert _in_ring(connectivity, AtomIdx(0))
+    assert _in_ring(connectivity, AtomIdx(0), AtomIdx(1))
+
+    mol = sr.smiles("C1CCCCC1CC")
+    connectivity = mol.property("connectivity")
+    assert _in_ring(connectivity, AtomIdx(0))
+    assert not _in_ring(connectivity, AtomIdx(mol.num_atoms() - 1))
+    assert not _in_ring(connectivity, AtomIdx(5), AtomIdx(6))
+
+
+def test_physical_connectivity_ring():
+    """
+    Test that a ring bridge is found from the physical atoms of an end state.
+    """
+
+    import sire.morph as morph
+    from sire.legacy.Mol import AtomIdx
+
+    from ghostly._ghostly import _create_connectivity, _in_ring, _physical_connectivity
+
+    # Toluene to pyridine: at lambda = 1 the methyl carbon is a ghost bonded to
+    # the ring, which stays a ring once the bonds to ghosts are removed.
+    mol = sr.load_test_files("tol2pyr.s3")[0]
+    connectivity = _create_connectivity(morph.link_to_perturbed(mol))
+    physical = _physical_connectivity(mol, connectivity, is_lambda1=True)
+    assert not physical.are_bonded(AtomIdx(0), AtomIdx(1))
+    assert _in_ring(physical, AtomIdx(1))
+
+
+def test_to_rdkit_end_state():
+    """
+    Test the conversion of an end state to RDKit without its ghost atoms.
+    """
+
+    from ghostly._ghostly import _to_rdkit_end_state
+
+    mol = sr.load_test_files("tol2pyr.s3")[0]
+
+    # At lambda = 1 the methyl group is a ghost, so atom 1, the pyridine
+    # nitrogen, comes first.
+    rdmol, index = _to_rdkit_end_state(mol, is_lambda1=True)
+    num_physical = sum(e.num_protons() > 0 for e in mol.property("element1"))
+    assert rdmol.GetNumAtoms() == num_physical
+    assert 0 not in index
+    assert index[1] == 0
+    atom = rdmol.GetAtomWithIdx(index[1])
+    assert atom.GetSymbol() == "N" and atom.GetIsAromatic()
+
+    # At lambda = 0 every atom is physical and the ring is aromatic.
+    rdmol, index = _to_rdkit_end_state(mol, is_lambda1=False)
+    assert rdmol.GetNumAtoms() == mol.num_atoms()
+    assert rdmol.GetAtomWithIdx(index[1]).GetIsAromatic()
+
+
+def test_linearise_ring_break_without_chirality(monkeypatch):
+    """
+    Test that a failed chirality check skips linearisation rather than raising.
+    """
+
+    import ghostly._ghostly as _ghostly
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("no bond orders")
+
+    monkeypatch.setattr(_ghostly, "_to_rdkit_end_state", fail)
+
+    mols = sr.load_test_files("hex2prp.s3")
+    _, modifications = modify(mols, linearise_ring_break=True)
+
+    for state in ("lambda_0", "lambda_1"):
+        assert modifications[state]["linearised_ring_break"] == []
+
+
 def dihedral_functions(mol, prop):
     """
     Return a dictionary mapping dihedral indices to their functions.
