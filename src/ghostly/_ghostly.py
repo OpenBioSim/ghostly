@@ -48,6 +48,9 @@ del _sys
 # Triple junctions needing more than this energy (kcal/mol) to flatten are non-planar.
 _MAX_PLANAR_FLATTENING = 2.0
 
+# The longest path searched when checking for rings, which covers macrocycles.
+_MAX_RING_PATH = 50
+
 
 def modify(
     system,
@@ -440,8 +443,10 @@ def modify(
                     num_optimise=num_optimise,
                 )
 
-            # Remove any improper dihedrals connecting ghosts to the physical region.
-            mol = _remove_impropers(mol, ghosts0, modifications, is_lambda1=False)
+        # Remove any improper dihedrals connecting ghosts to the physical region.
+        mol = _remove_impropers(
+            mol, ghosts0, connectivity0, modifications, is_lambda1=False
+        )
 
         # Remove any residual ghost dihedrals not caught by the per-bridge
         # junction handlers (cross-bridge and ghost-middle patterns).
@@ -475,6 +480,8 @@ def modify(
             physical0,
             ghosts0,
             ghosts1,
+            connectivity0,
+            connectivity1,
             modifications,
             is_lambda1=False,
             soften_anchors=soften_anchors,
@@ -545,8 +552,10 @@ def modify(
                     is_lambda1=True,
                 )
 
-            # Remove any improper dihedrals connecting ghosts to the physical region.
-            mol = _remove_impropers(mol, ghosts1, modifications, is_lambda1=True)
+        # Remove any improper dihedrals connecting ghosts to the physical region.
+        mol = _remove_impropers(
+            mol, ghosts1, connectivity1, modifications, is_lambda1=True
+        )
 
         # Remove any residual ghost dihedrals not caught by the per-bridge
         # junction handlers (cross-bridge and ghost-middle patterns).
@@ -580,6 +589,8 @@ def modify(
             physical1,
             ghosts1,
             ghosts0,
+            connectivity1,
+            connectivity0,
             modifications,
             is_lambda1=True,
             soften_anchors=soften_anchors,
@@ -928,7 +939,9 @@ def _dual(
         mod_key = "lambda_0"
         suffix = "0"
 
-    bridge_in_ring = connectivity.in_ring(bridge)
+    bridge_in_ring = _in_ring(
+        _physical_connectivity(mol, connectivity, is_lambda1), bridge
+    )
 
     # Score the physical neighbours.
     if bridge_indices is not None:
@@ -1322,7 +1335,9 @@ def _triple(
             _logger.debug(f"  Flattening energy: {flattening:.3f} kcal/mol")
             is_planar = flattening < _MAX_PLANAR_FLATTENING
 
-    bridge_in_ring = connectivity.in_ring(bridge)
+    bridge_in_ring = _in_ring(
+        _physical_connectivity(mol, connectivity, is_lambda1), bridge
+    )
 
     # Score the physical neighbours.
     if bridge_indices is not None:
@@ -1887,7 +1902,7 @@ def _higher(
     )
 
 
-def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
+def _remove_impropers(mol, ghosts, connectivity, modifications, is_lambda1=False):
     """
     Remove improper dihedral terms that bridge the ghost and physical systems,
     other than those centred on a physical ring atom with a single ghost. These
@@ -1901,6 +1916,9 @@ def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
 
     ghosts : List[sire.legacy.Mol.AtomIdx]
         The list of ghost atoms.
+
+    connectivity : sire.legacy.Mol.Connectivity
+        The connectivity of the molecule at the end state.
 
     modifications : dict
         A dictionary to store details of the modifications made.
@@ -1929,7 +1947,7 @@ def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
     # Initialise a container to store the updated bonded terms.
     new_impropers = _SireMM.FourAtomFunctions(mol.info())
 
-    connectivity = _end_state_connectivity(mol, is_lambda1)
+    physical_connectivity = _physical_connectivity(mol, connectivity, is_lambda1)
 
     # Loop over the improper dihedrals.
     for p in impropers.potentials():
@@ -1953,7 +1971,7 @@ def _remove_impropers(mol, ghosts, modifications, is_lambda1=False):
             num_ghosts == 1
             and centre is not None
             and centre not in ghosts
-            and connectivity.in_ring(centre)
+            and _in_ring(physical_connectivity, centre)
         )
 
         # Remove any improper dihedrals that bridge the ghost and physical systems.
@@ -2447,6 +2465,8 @@ def _modify_mixed_dihedrals(
     physical,
     ghosts,
     ref_ghosts,
+    connectivity,
+    ref_connectivity,
     modifications,
     is_lambda1=False,
     soften_anchors=1.0,
@@ -2544,7 +2564,13 @@ def _modify_mixed_dihedrals(
     ref = _physical_state(mol, is_lambda1)
 
     rotatable_bonds = _find_rotatable_bonds(
-        ref, bridges, physical, is_lambda1=is_lambda1, warn=not stiffen_rotamers
+        ref,
+        bridges,
+        physical,
+        connectivity,
+        ref_connectivity,
+        is_lambda1=is_lambda1,
+        warn=not stiffen_rotamers,
     )
 
     # Nothing to do if no modifications are requested.
@@ -2655,7 +2681,9 @@ def _modify_mixed_dihedrals(
     return mol
 
 
-def _find_rotatable_bonds(ref, bridges, physical, is_lambda1=False, warn=True):
+def _find_rotatable_bonds(
+    ref, bridges, physical, connectivity, ref_connectivity, is_lambda1=False, warn=True
+):
     r"""
     Find the rotatable bridge--physical bonds, i.e. those that are not in a
     ring and whose bridge atom is neither planar nor linear in the end state
@@ -2683,6 +2711,12 @@ def _find_rotatable_bonds(ref, bridges, physical, is_lambda1=False, warn=True):
     physical : dict
         A dictionary mapping bridge atoms to their physical neighbours.
 
+    connectivity : sire.legacy.Mol.Connectivity
+        The connectivity of the molecule at the end state of the bridges.
+
+    ref_connectivity : sire.legacy.Mol.Connectivity
+        The connectivity of the molecule at the opposite end state.
+
     is_lambda1 : bool, optional
         Whether the bridges are at lambda = 1.
 
@@ -2702,18 +2736,16 @@ def _find_rotatable_bonds(ref, bridges, physical, is_lambda1=False, warn=True):
     if not bridges:
         return rotatable_bonds
 
-    connectivity = _end_state_connectivity(ref, is_lambda1)
-
     for bridge in bridges:
         # The ghosts are physical at the opposite end state.
-        if not _is_rotor(ref, bridge, not is_lambda1):
+        if not _is_rotor(ref, bridge, ref_connectivity, not is_lambda1):
             continue
 
         for p in physical[bridge]:
             # Ring membership from the connectivity, since the physical
             # neighbour may be a ghost at the opposite end state.
-            if not connectivity.are_bonded(p, bridge) or connectivity.in_ring(
-                p, bridge
+            if not connectivity.are_bonded(p, bridge) or _in_ring(
+                connectivity, p, bridge
             ):
                 continue
 
@@ -2765,16 +2797,32 @@ def _to_rdkit_end_state(mol, is_lambda1=False):
     return rdmol, {index: i for i, index in enumerate(physical)}
 
 
-def _end_state_connectivity(mol, is_lambda1=False):
+def _physical_connectivity(mol, connectivity, is_lambda1=False):
     """
-    Return the connectivity of a perturbable molecule at an end state, including
-    the bonds to ghost atoms. Only ring-breaking molecules have end state
-    connectivities that differ.
+    Return the connectivity without the bonds to the ghost atoms of an end state.
     """
-    key = "connectivity1" if is_lambda1 else "connectivity0"
-    if mol.has_property(key):
-        return mol.property(key)
-    return mol.property("connectivity")
+    info = mol.info()
+    elements = mol.property("element1" if is_lambda1 else "element0")
+    physical = _SireMol.Connectivity(info).edit()
+    for bond in connectivity.get_bonds():
+        idx0 = info.atom_idx(bond.atom0())
+        idx1 = info.atom_idx(bond.atom1())
+        if all(elements[idx.value()].num_protons() > 0 for idx in (idx0, idx1)):
+            physical.connect(idx0, idx1)
+    return physical.commit()
+
+
+def _in_ring(connectivity, atom0, atom1=None):
+    """
+    Return whether an atom, or the bond between two atoms, is in a ring. Sire's
+    in_ring only finds rings of up to 12 atoms, which misses macrocycles.
+    """
+    if atom1 is not None:
+        return len(connectivity.find_paths(atom0, atom1, _MAX_RING_PATH)) > 1
+    return any(
+        _in_ring(connectivity, atom0, other)
+        for other in connectivity.connections_to(atom0)
+    )
 
 
 def _angle_terms(mol, bridge, atoms, is_lambda1=False):
@@ -2819,7 +2867,7 @@ def _flattening_energy(mol, bridge, atoms, is_lambda1=False):
     return shortfall**2 / sum(1 / term.k() for term in terms.values())
 
 
-def _is_rotor(mol, bridge, is_lambda1=False, max_angle=170):
+def _is_rotor(mol, bridge, connectivity, is_lambda1=False, max_angle=170):
     """
     Return whether rotation about the bonds of the bridge atom can move its
     other substituents at an end state, i.e. the bridge is neither planar, by
@@ -2830,7 +2878,7 @@ def _is_rotor(mol, bridge, is_lambda1=False, max_angle=170):
     elements = mol.property("element1" if is_lambda1 else "element0")
     neighbours = [
         n
-        for n in _end_state_connectivity(mol, is_lambda1).connections_to(bridge)
+        for n in connectivity.connections_to(bridge)
         if elements[n.value()].num_protons() > 0
     ]
 
