@@ -1060,10 +1060,33 @@ def test_to_rdkit_end_state():
     assert rdmol.GetAtomWithIdx(index[1]).GetIsAromatic()
 
 
+def test_ring_closed_by_ghosts():
+    """
+    Test that a ring closed only through ghost atoms isn't a ring once the bonds
+    to the ghosts are removed.
+    """
+
+    from sire.legacy.Mol import AtomIdx
+
+    from ghostly._ghostly import _in_ring, _physical_connectivity
+
+    mol = sr.smiles("C1CCCCC1")
+    connectivity = mol.property("connectivity")
+    physical = _physical_connectivity(mol, connectivity, [AtomIdx(2), AtomIdx(3)])
+
+    assert _in_ring(connectivity, AtomIdx(0))
+    assert not _in_ring(physical, AtomIdx(0))
+    assert not _in_ring(physical, AtomIdx(0), AtomIdx(1))
+
+
 def test_linearise_ring_break_without_chirality(monkeypatch):
     """
-    Test that a failed chirality check skips linearisation rather than raising.
+    Test that, when chirality can't be checked, only ring-break ghosts that
+    could be stereocentres are left unlinearised.
     """
+
+    import sire.morph as morph
+    from sire.legacy.Mol import AtomIdx
 
     import ghostly._ghostly as _ghostly
 
@@ -1072,11 +1095,45 @@ def test_linearise_ring_break_without_chirality(monkeypatch):
 
     monkeypatch.setattr(_ghostly, "_to_rdkit_end_state", fail)
 
-    mols = sr.load_test_files("hex2prp.s3")
-    _, modifications = modify(mols, linearise_ring_break=True)
+    def modifications():
+        def state():
+            return {
+                "removed_angles": [],
+                "removed_dihedrals": [],
+                "stiffened_angles": {},
+                "softened_angles": {},
+                "softened_dihedrals": [],
+                "stiffened_dihedrals": [],
+                "single_well_dihedrals": [],
+                "linearised_ring_break": [],
+                "softened_bonds": {},
+            }
 
-    for state in ("lambda_0", "lambda_1"):
-        assert modifications[state]["linearised_ring_break"] == []
+        return {"lambda_0": state(), "lambda_1": state()}
+
+    # Treating the pyridine nitrogen and the methyl carbon as ghosts at lambda = 1
+    # leaves the nitrogen bonded to two physical atoms. It has three neighbours
+    # in toluene, so can't be a stereocentre, and is linearised.
+    mol = sr.load_test_files("tol2pyr.s3")[0]
+    connectivity = _ghostly._create_connectivity(morph.link_to_perturbed(mol))
+    _, linearised = _ghostly._linearise_ring_break(
+        mol, [AtomIdx(1), AtomIdx(0)], connectivity, modifications(), is_lambda1=True
+    )
+    assert {ghost.value() for ghost in linearised} == {1}
+
+    # A hexane carbon with its hydrogens as ghosts has four or more neighbours
+    # in propane, so could be a stereocentre, and is skipped.
+    mol = sr.load_test_files("hex2prp.s3")[0]
+    connectivity = _ghostly._create_connectivity(morph.link_to_reference(mol))
+    hydrogens = [
+        n
+        for n in connectivity.connections_to(AtomIdx(2))
+        if mol.property("element0")[n.value()].symbol() == "H"
+    ]
+    _, linearised = _ghostly._linearise_ring_break(
+        mol, [AtomIdx(2), *hydrogens], connectivity, modifications()
+    )
+    assert linearised == set()
 
 
 def dihedral_functions(mol, prop):
