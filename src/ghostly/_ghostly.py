@@ -958,8 +958,15 @@ def _dual(
 
     bridge_in_ring = physical_connectivity.in_ring(bridge)
 
+    # A linear bridge can only satisfy its ghost angles if all are 90 degrees,
+    # so stiffen through every physical neighbour regardless of score.
+    from math import degrees
+
+    terms = list(_angle_terms(mol, bridge, physical, is_lambda1).values())
+    bridge_linear = len(terms) == 1 and degrees(terms[0].theta0()) >= 170
+
     # Score the physical neighbours.
-    if bridge_indices is not None:
+    if bridge_indices is not None and not bridge_linear:
         phys_scores = {p: _score_atom(mol, p, bridge_indices) for p in physical}
         best_phys_score = min(phys_scores.values())
 

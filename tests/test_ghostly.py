@@ -697,6 +697,58 @@ def test_pfkfb3_48_to_47_skipped_neighbour():
             assert str(p.function()) == original[idx]
 
 
+def test_pfkfb3_48_to_47_linear_bridge():
+    """
+    Test that a linear dual bridge is stiffened through every physical
+    neighbour, even a poorly-scoring one, since its ghost angles can only all
+    be satisfied at 90 degrees.
+    """
+
+    from math import pi
+
+    from sire.legacy.CAS import Symbol
+    from sire.legacy.MM import AmberAngle
+    from sire.legacy.Mol import AtomIdx, Element
+
+    mols = sr.load_test_files("pfkfb3_48_47.s3")
+
+    angles0 = mols[0].property("angle0")
+    angles0.set(
+        AtomIdx(13),
+        AtomIdx(27),
+        AtomIdx(28),
+        AmberAngle(100, pi).to_expression(Symbol("theta")),
+    )
+    mol = (
+        mols[0]
+        .edit()
+        .atom(28)
+        .set_property("element1", Element("N"))
+        .molecule()
+        .set_property("angle0", angles0)
+    )
+    mols.update(mol.commit())
+
+    _, modifications = modify(mols)
+
+    def key(idx):
+        i, j, k = idx.split(",")
+        return ",".join(sorted((i, k)) + [j])
+
+    stiffened = {
+        key(idx): params
+        for idx, params in modifications["lambda_0"]["stiffened_angles"].items()
+    }
+    assert set(stiffened) == {
+        "13,47,27",
+        "13,48,27",
+        "28,47,27",
+        "28,48,27",
+        "47,48,27",
+    }
+    assert stiffened["47,48,27"]["theta0"] == 180.0
+
+
 def test_stiffen_rotamers_reference_geometry():
     """
     Test that stiffened rotamer anchor dihedrals have their minimum at the
