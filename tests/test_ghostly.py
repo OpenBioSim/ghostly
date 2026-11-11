@@ -1249,6 +1249,66 @@ def check_angle(info, potentials, idx0, idx1, idx2):
     return False
 
 
+def test_hexane_to_propane_linear_anchor():
+    """
+    Test that an anchor dihedral through an angle that is linear at the end
+    state where its ghost is a ghost is removed, as for a terminal junction at
+    a nitrile.
+    """
+    from math import pi
+
+    from sire.legacy.CAS import Symbol
+    from sire.legacy.MM import AmberAngle
+
+    mols = sr.load_test_files("hex2prp.s3")
+    info = mols[0].info()
+    ghosts = {
+        i for i, e in enumerate(mols[0].property("element1")) if e.num_protons() == 0
+    }
+
+    # Find an anchor dihedral that survives at lambda = 1.
+    new_mols, _ = modify(mols)
+    anchor = None
+    for p in new_mols[0].property("dihedral1").potentials():
+        idx = [
+            info.atom_idx(a).value()
+            for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())
+        ]
+        if not p.function().is_zero() and (idx[0] in ghosts) != (idx[3] in ghosts):
+            if not ghosts & set(idx[1:3]):
+                anchor = idx
+                break
+    assert anchor is not None
+    angle = anchor[1:] if anchor[0] in ghosts else anchor[:3]
+
+    # Make the physical angle the anchor passes through linear at lambda = 1.
+    theta = Symbol("theta")
+    angles = mols[0].property("angle1")
+    for p in angles.potentials():
+        idx = [info.atom_idx(a) for a in (p.atom0(), p.atom1(), p.atom2())]
+        if [i.value() for i in idx] in (angle, angle[::-1]):
+            k = AmberAngle(p.function(), theta).k()
+            angles.set(*idx, AmberAngle(k, pi).to_expression(theta))
+    mol = mols[0].edit().set_property("angle1", angles).molecule().commit()
+    mols.update(mol)
+
+    new_mols, modifications = modify(mols)
+
+    for p in new_mols[0].property("dihedral1").potentials():
+        idx = [
+            info.atom_idx(a).value()
+            for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())
+        ]
+        if ghosts & set(idx):
+            assert set(angle) not in (set(idx[:3]), set(idx[1:]))
+
+    removed = modifications["lambda_1"]["removed_dihedrals"]
+    assert (
+        ",".join(map(str, anchor)) in removed
+        or ",".join(map(str, anchor[::-1])) in removed
+    )
+
+
 def check_dihedral(info, potentials, idx0, idx1, idx2, idx3):
     """
     Check if a dihedral potential is in a list of potentials.

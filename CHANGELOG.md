@@ -16,6 +16,7 @@ Changelog
 * Keep improper dihedrals that hold a single ghost in the plane of a ring bridge, since nothing else stops the ghost crossing the plane when the angles aren't stiffened, and remove the ``--stiffen-ring-bridges`` option [#23](https://github.com/OpenBioSim/ghostly/pull/23).
 * Always stiffen ghost angles at bridges that aren't in a ring, and remove the ``--stiffen-sp2-bridges`` option. Without impropers, the angle terms of an sp2 bridge don't hold a ghost in the plane, so skipping stiffening let it cross freely. At linear bridges, angles through poorly-scoring physical neighbours are stiffened too, since the ghost angles can only all be satisfied at 90 degrees [#23](https://github.com/OpenBioSim/ghostly/pull/23).
 * Detect rotatable bridge bonds from the angle terms of the bridge, rather than its RDKit hybridisation, so that rotamer detection is consistent with junction planarity [#23](https://github.com/OpenBioSim/ghostly/pull/23).
+* Remove dihedrals and impropers involving ghost atoms that pass through an angle that is linear at the end state, e.g. anchor dihedrals at a terminal junction whose physical neighbour is a nitrile carbon. These terms are undefined for collinear atoms, where their forces diverge [#23](https://github.com/OpenBioSim/ghostly/pull/23).
 
 [2026.2.0](https://github.com/openbiosim/ghostly/compare/2026.1.0...2026.2.0) - Sep 2026
 ----------------------------------------------------------------------------------------

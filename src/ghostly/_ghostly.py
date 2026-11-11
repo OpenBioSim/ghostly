@@ -48,6 +48,9 @@ del _sys
 # Triple junctions needing more than this energy (kcal/mol) to flatten are non-planar.
 _MAX_PLANAR_FLATTENING = 2.0
 
+# Angles with an equilibrium value of at least this many degrees are linear.
+_LINEAR_ANGLE = 170.0
+
 
 def modify(
     system,
@@ -482,6 +485,11 @@ def modify(
             mol, ghosts0, modifications, skip_ghosts=linearised0, is_lambda1=False
         )
 
+        # Remove ghost dihedrals and impropers through angles that are linear.
+        mol = _remove_linear_ghost_dihedrals(
+            mol, ghosts0, modifications, is_lambda1=False
+        )
+
         # Soften, single-well or stiffen surviving mixed ghost/physical dihedrals.
         mol = _modify_mixed_dihedrals(
             mol,
@@ -596,6 +604,11 @@ def modify(
         # atoms are physical (e.g. B1-G-B2 in ring-breaking topologies).
         mol = _remove_ghost_centre_angles(
             mol, ghosts1, modifications, skip_ghosts=linearised1, is_lambda1=True
+        )
+
+        # Remove ghost dihedrals and impropers through angles that are linear.
+        mol = _remove_linear_ghost_dihedrals(
+            mol, ghosts1, modifications, is_lambda1=True
         )
 
         # Soften, single-well or stiffen surviving mixed ghost/physical dihedrals.
@@ -963,7 +976,7 @@ def _dual(
     from math import degrees
 
     terms = list(_angle_terms(mol, bridge, physical, is_lambda1).values())
-    bridge_linear = len(terms) == 1 and degrees(terms[0].theta0()) >= 170
+    bridge_linear = len(terms) == 1 and degrees(terms[0].theta0()) >= _LINEAR_ANGLE
 
     # Score the physical neighbours.
     if bridge_indices is not None and not bridge_linear:
@@ -2018,6 +2031,95 @@ def _remove_impropers(
     )
 
     # Return the updated molecule.
+    return mol
+
+
+def _remove_linear_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=False):
+    r"""
+    Remove dihedrals and impropers involving a ghost atom that pass through an
+    angle that is linear at the current end state, i.e. three consecutive atoms
+    of the term are the atoms of the angle. These terms are undefined when the
+    angle's atoms are collinear, where their forces diverge, e.g. an anchor
+    dihedral at a terminal junction whose physical neighbour is a nitrile
+    carbon. The ghosts remain held by their angle terms, so they can only
+    rotate about the linear axis, which doesn't couple to the physical system.
+
+          DR
+            \
+             X---C≡N---R        DR-X-C-R removed if X-C-R is linear
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms at the current end state.
+
+    modifications : dict
+        A dictionary to store details of the modifications made.
+
+    is_lambda1 : bool, optional
+        Whether to modify the terms at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+    from math import degrees
+
+    from sire.legacy.CAS import Symbol
+
+    # Nothing to do if there are no ghost atoms.
+    if not ghosts:
+        return mol
+
+    info = mol.info()
+    suffix = "1" if is_lambda1 else "0"
+    mod_key = "lambda_1" if is_lambda1 else "lambda_0"
+    ghosts = set(ghosts)
+
+    theta = Symbol("theta")
+    linear = set()
+    for p in mol.property("angle" + suffix).potentials():
+        try:
+            theta0 = degrees(_SireMM.AmberAngle(p.function(), theta).theta0())
+        except Exception:
+            continue
+        if theta0 >= _LINEAR_ANGLE:
+            linear.add(
+                frozenset(info.atom_idx(a) for a in (p.atom0(), p.atom1(), p.atom2()))
+            )
+
+    if not linear:
+        return mol
+
+    for name in ("dihedral", "improper"):
+        terms = mol.property(name + suffix)
+        new_terms = _SireMM.FourAtomFunctions(info)
+        removed = False
+        for p in terms.potentials():
+            idxs = [
+                info.atom_idx(a) for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())
+            ]
+            if any(idx in ghosts for idx in idxs) and (
+                frozenset(idxs[:3]) in linear or frozenset(idxs[1:]) in linear
+            ):
+                dih_idx = ",".join(str(idx.value()) for idx in idxs)
+                _logger.debug(
+                    f"  Removing {name} through a linear angle: [{dih_idx}], {p.function()}"
+                )
+                modifications[mod_key]["removed_dihedrals"].append(dih_idx)
+                removed = True
+            else:
+                new_terms.set(*idxs, p.function())
+
+        if removed:
+            mol = mol.edit().set_property(name + suffix, new_terms).molecule().commit()
+
     return mol
 
 
