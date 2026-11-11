@@ -847,13 +847,28 @@ def _terminal(
     # Initialise a container to store the updated dihedrals.
     new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
 
+    # Avoid anchors reached through a linear angle where possible, since
+    # dihedrals through linear angles are removed later.
+    from math import degrees
+
+    candidates = [
+        c
+        for c in physical2
+        if not any(
+            degrees(term.theta0()) >= _LINEAR_ANGLE
+            for p in physical
+            if connectivity.are_bonded(p, c)
+            for term in _angle_terms(mol, p, [bridge, c], is_lambda1).values()
+        )
+    ] or physical2
+
     # Select the best anchor atom and remove it from the list. Dihedrals
     # through the remaining physical2 atoms will be removed; dihedrals through
     # the anchor are kept to constrain the ghost group's orientation.
-    if bridge_indices is not None and len(physical2) > 1:
-        anchor = _select_anchor(mol, physical2, bridge_indices)
+    if bridge_indices is not None and len(candidates) > 1:
+        anchor = _select_anchor(mol, candidates, bridge_indices)
     else:
-        anchor = physical2[0]
+        anchor = candidates[0]
     physical2.remove(anchor)
     _logger.debug(f"  Anchor atom: {anchor.value()}")
     for p in dihedrals.potentials():
@@ -2037,16 +2052,8 @@ def _remove_impropers(
 def _remove_linear_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=False):
     r"""
     Remove dihedrals and impropers involving a ghost atom that pass through an
-    angle that is linear at the current end state, i.e. three consecutive atoms
-    of the term are the atoms of the angle. These terms are undefined when the
-    angle's atoms are collinear, where their forces diverge, e.g. an anchor
-    dihedral at a terminal junction whose physical neighbour is a nitrile
-    carbon. The ghosts remain held by their angle terms, so they can only
-    rotate about the linear axis, which doesn't couple to the physical system.
-
-          DR
-            \
-             X---C≡N---R        DR-X-C-R removed if X-C-R is linear
+    angle that is linear at the current end state, since they are undefined,
+    and their forces diverge, when the angle's atoms are collinear.
 
     Parameters
     ----------
@@ -2088,6 +2095,9 @@ def _remove_linear_ghost_dihedrals(mol, ghosts, modifications, is_lambda1=False)
         try:
             theta0 = degrees(_SireMM.AmberAngle(p.function(), theta).theta0())
         except Exception:
+            _logger.debug(
+                f"  Skipping non-harmonic angle in linear check: {p.function()}"
+            )
             continue
         if theta0 >= _LINEAR_ANGLE:
             linear.add(
@@ -3026,7 +3036,7 @@ def _flattening_energy(mol, bridge, atoms, is_lambda1=False):
     return shortfall**2 / sum(1 / term.k() for term in terms.values())
 
 
-def _is_rotor(mol, bridge, connectivity, is_lambda1=False, max_angle=170):
+def _is_rotor(mol, bridge, connectivity, is_lambda1=False, max_angle=_LINEAR_ANGLE):
     """
     Return whether rotation about the bonds of the bridge atom can move its
     other substituents at an end state, i.e. the bridge is neither planar, by
@@ -3063,7 +3073,7 @@ def _physical_state(mol, is_lambda1=False):
         return _morph.link_to_perturbed(mol)
 
 
-def _single_well(ref, idxs, k, ref_ghosts, max_angle=170):
+def _single_well(ref, idxs, k, ref_ghosts, max_angle=_LINEAR_ANGLE):
     """
     Return a single-well n=1 cosine dihedral term, k[1 + cos(phi - phi_ref + pi)],
     with its minimum at the dihedral angle phi_ref of the atoms ``idxs`` in the

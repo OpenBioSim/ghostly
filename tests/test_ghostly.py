@@ -1,3 +1,4 @@
+import pytest
 import sire as sr
 
 from ghostly import modify
@@ -1249,64 +1250,81 @@ def check_angle(info, potentials, idx0, idx1, idx2):
     return False
 
 
-def test_hexane_to_propane_linear_anchor():
+@pytest.mark.parametrize(
+    "file, state, name",
+    [
+        ("hex2prp.s3", 1, "dihedral"),
+        ("acepol.s3", 0, "dihedral"),
+        ("tol2pyr.s3", 1, "improper"),
+    ],
+)
+def test_linear_ghost_terms(file, state, name):
     """
-    Test that an anchor dihedral through an angle that is linear at the end
-    state where its ghost is a ghost is removed, as for a terminal junction at
-    a nitrile.
+    Test that a ghost dihedral or improper through an angle that is linear at
+    the end state where the ghost is a ghost is removed, as for an anchor at a
+    terminal junction on a nitrile.
     """
     from math import pi
 
     from sire.legacy.CAS import Symbol
     from sire.legacy.MM import AmberAngle
 
-    mols = sr.load_test_files("hex2prp.s3")
+    mols = sr.load_test_files(file)
     info = mols[0].info()
     ghosts = {
-        i for i, e in enumerate(mols[0].property("element1")) if e.num_protons() == 0
+        i
+        for i, e in enumerate(mols[0].property(f"element{state}"))
+        if e.num_protons() == 0
     }
 
-    # Find an anchor dihedral that survives at lambda = 1.
-    new_mols, _ = modify(mols)
-    anchor = None
-    for p in new_mols[0].property("dihedral1").potentials():
-        idx = [
-            info.atom_idx(a).value()
-            for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())
-        ]
-        if not p.function().is_zero() and (idx[0] in ghosts) != (idx[3] in ghosts):
-            if not ghosts & set(idx[1:3]):
-                anchor = idx
-                break
-    assert anchor is not None
-    angle = anchor[1:] if anchor[0] in ghosts else anchor[:3]
+    def atoms(p, n):
+        return [info.atom_idx(getattr(p, f"atom{i}")()).value() for i in range(n)]
 
-    # Make the physical angle the anchor passes through linear at lambda = 1.
+    # Find a surviving ghost term that passes through an angle term.
+    new_mols, _ = modify(mols)
+    angles = {
+        frozenset(atoms(p, 3)): atoms(p, 3)
+        for p in new_mols[0].property(f"angle{state}").potentials()
+    }
+    term, angle = None, None
+    for p in new_mols[0].property(f"{name}{state}").potentials():
+        idx = atoms(p, 4)
+        if p.function().is_zero() or not ghosts & set(idx):
+            continue
+        for triple in (frozenset(idx[:3]), frozenset(idx[1:])):
+            if triple in angles:
+                term, angle = idx, angles[triple]
+                break
+        if term is not None:
+            break
+    assert term is not None
+
+    # Make that angle linear at the end state.
     theta = Symbol("theta")
-    angles = mols[0].property("angle1")
-    for p in angles.potentials():
+    old = mols[0].property(f"angle{state}")
+    new = old.__class__(info)
+    linearised = False
+    for p in old.potentials():
         idx = [info.atom_idx(a) for a in (p.atom0(), p.atom1(), p.atom2())]
+        function = p.function()
         if [i.value() for i in idx] in (angle, angle[::-1]):
-            k = AmberAngle(p.function(), theta).k()
-            angles.set(*idx, AmberAngle(k, pi).to_expression(theta))
-    mol = mols[0].edit().set_property("angle1", angles).molecule().commit()
+            k = AmberAngle(function, theta).k()
+            function = AmberAngle(k, pi).to_expression(theta)
+            linearised = True
+        new.set(*idx, function)
+    assert linearised
+    mol = mols[0].edit().set_property(f"angle{state}", new).molecule().commit()
     mols.update(mol)
 
     new_mols, modifications = modify(mols)
 
-    for p in new_mols[0].property("dihedral1").potentials():
-        idx = [
-            info.atom_idx(a).value()
-            for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())
-        ]
+    for p in new_mols[0].property(f"{name}{state}").potentials():
+        idx = atoms(p, 4)
         if ghosts & set(idx):
             assert set(angle) not in (set(idx[:3]), set(idx[1:]))
 
-    removed = modifications["lambda_1"]["removed_dihedrals"]
-    assert (
-        ",".join(map(str, anchor)) in removed
-        or ",".join(map(str, anchor[::-1])) in removed
-    )
+    removed = modifications[f"lambda_{state}"]["removed_dihedrals"]
+    assert ",".join(map(str, term)) in removed
 
 
 def check_dihedral(info, potentials, idx0, idx1, idx2, idx3):
