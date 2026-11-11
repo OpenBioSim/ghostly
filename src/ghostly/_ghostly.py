@@ -2603,6 +2603,8 @@ def _modify_mixed_dihedrals(
         physical,
         connectivity,
         ref_connectivity,
+        mol.property("dihedral1" if is_lambda1 else "dihedral0"),
+        ghosts,
         is_lambda1=is_lambda1,
         warn=not stiffen_rotamers,
     )
@@ -2716,13 +2718,22 @@ def _modify_mixed_dihedrals(
 
 
 def _find_rotatable_bonds(
-    ref, bridges, physical, connectivity, ref_connectivity, is_lambda1=False, warn=True
+    ref,
+    bridges,
+    physical,
+    connectivity,
+    ref_connectivity,
+    dihedrals,
+    ghosts,
+    is_lambda1=False,
+    warn=True,
 ):
     r"""
     Find the rotatable bridge--physical bonds, i.e. those that are not in a
-    ring and whose bridge atom is neither planar nor linear in the end state
-    where the ghosts are physical, so that surviving anchor dihedrals across
-    them can allow rotameric transitions of ghost atoms.
+    ring, whose bridge atom is neither planar nor linear in the end state
+    where the ghosts are physical, and that are the central bond of a
+    surviving anchor dihedral, which can allow rotameric transitions of ghost
+    atoms.
 
         R1     DR1
           \   /
@@ -2751,6 +2762,13 @@ def _find_rotatable_bonds(
     ref_connectivity : sire.legacy.Mol.Connectivity
         The connectivity of the molecule at the opposite end state.
 
+    dihedrals : sire.legacy.MM.FourAtomFunctions
+        The dihedrals at the end state of the bridges, after the junction
+        modifications.
+
+    ghosts : set of sire.legacy.Mol.AtomIdx
+        The ghost atoms at the end state of the bridges.
+
     is_lambda1 : bool, optional
         Whether the bridges are at lambda = 1.
 
@@ -2770,6 +2788,15 @@ def _find_rotatable_bonds(
     if not bridges:
         return rotatable_bonds
 
+    info = ref.info()
+    anchored = set()
+    for p in dihedrals.potentials():
+        if p.function().is_zero():
+            continue
+        idx = [info.atom_idx(a) for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())]
+        if idx[0] in ghosts or idx[3] in ghosts:
+            anchored.add(frozenset((idx[1], idx[2])))
+
     for bridge in bridges:
         # The ghosts are physical at the opposite end state.
         if not _is_rotor(ref, bridge, ref_connectivity, not is_lambda1):
@@ -2778,8 +2805,10 @@ def _find_rotatable_bonds(
         for p in physical[bridge]:
             # Ring membership from the connectivity, since the physical
             # neighbour may be a ghost at the opposite end state.
-            if not connectivity.are_bonded(p, bridge) or connectivity.in_ring(
-                p, bridge
+            if (
+                not connectivity.are_bonded(p, bridge)
+                or connectivity.in_ring(p, bridge)
+                or frozenset((p, bridge)) not in anchored
             ):
                 continue
 
