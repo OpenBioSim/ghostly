@@ -1327,6 +1327,59 @@ def test_linear_ghost_terms(file, state, name):
     assert ",".join(map(str, term)) in removed
 
 
+def test_hexane_to_propane_avoid_linear_anchor():
+    """
+    Test that a terminal junction is anchored through a candidate that isn't
+    reached through a linear angle, when there is one. At lambda = 1, bridge 3
+    is anchored through 2 to 1, and 2 is also bonded to physical atoms 11 and 12.
+    """
+    from math import pi
+
+    from sire.legacy.CAS import Symbol
+    from sire.legacy.MM import AmberAngle
+
+    mols = sr.load_test_files("hex2prp.s3")
+    info = mols[0].info()
+    ghosts = {
+        i for i, e in enumerate(mols[0].property("element1")) if e.num_protons() == 0
+    }
+
+    def anchors(mol):
+        result = set()
+        for p in mol.property("dihedral1").potentials():
+            idx = [info.atom_idx(getattr(p, f"atom{i}")()).value() for i in range(4)]
+            if p.function().is_zero() or ghosts & set(idx[1:3]):
+                continue
+            if (idx[0] in ghosts) != (idx[3] in ghosts):
+                g, b, p1, p2 = idx if idx[0] in ghosts else idx[::-1]
+                result.add((b, p1, p2))
+        return result
+
+    new_mols, _ = modify(mols)
+    assert anchors(new_mols[0]) == {(3, 2, 1)}
+
+    # Make the angle through the current anchor linear at lambda = 1.
+    theta = Symbol("theta")
+    old = mols[0].property("angle1")
+    new = old.__class__(info)
+    linearised = False
+    for p in old.potentials():
+        idx = [info.atom_idx(getattr(p, f"atom{i}")()) for i in range(3)]
+        function = p.function()
+        if [i.value() for i in idx] in ([3, 2, 1], [1, 2, 3]):
+            k = AmberAngle(function, theta).k()
+            function = AmberAngle(k, pi).to_expression(theta)
+            linearised = True
+        new.set(*idx, function)
+    assert linearised
+    mols.update(mols[0].edit().set_property("angle1", new).molecule().commit())
+
+    new_mols, _ = modify(mols)
+    kept = anchors(new_mols[0])
+    assert kept
+    assert all(b == 3 and p1 == 2 and p2 in (11, 12) for b, p1, p2 in kept)
+
+
 def check_dihedral(info, potentials, idx0, idx1, idx2, idx3):
     """
     Check if a dihedral potential is in a list of potentials.
