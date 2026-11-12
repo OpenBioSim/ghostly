@@ -9,7 +9,7 @@ Changelog
 * Fixed ``--stiffen-rotamers`` placing the minimum of every stiffened dihedral at 0 degrees (cis), which eclipsed the ghosts with the anchor and stacked multiple ghosts on the same bridge. The minimum is now the dihedral angle measured in the end state where the ghosts are physical [#19](https://github.com/OpenBioSim/ghostly/pull/19).
 * Added ``--single-well-anchors`` and ``--k-single-well`` to replace surviving anchor dihedrals with a single-well cosine potential whose minimum is the geometry of the end state where the ghost is physical. Multi-well anchors, e.g. the n=2 term of a dummy hydrogen on a carbonyl oxygen, can trap ghosts in an alternative well at intermediate lambda, giving hysteresis between independently equilibrated windows. Anchors with zero force constants or an ill-defined reference dihedral are left unchanged. (Default: False, 5 kcal/mol) [#19](https://github.com/OpenBioSim/ghostly/pull/19).
 * Record the options used for each modification in a ``ghostly_options`` property on each modified molecule, and raise an error when modifying a system that has already been modified, unless ``--force`` is used. Forced modifications are applied on top of the existing ones [#20](https://github.com/OpenBioSim/ghostly/pull/20).
-* Added support for Python 3.13 and 3.14, and dropped support for Python 3.10 and 3.11.
+* Added support for Python 3.13 and 3.14, and dropped support for Python 3.10 and 3.11 [#21](https://github.com/OpenBioSim/ghostly/pull/21).
 * Fixed bridge atoms being typed by RDKit on end states with ghost atoms attached, where bond orders often couldn't be inferred, leaving every heavy atom typed as sp3 with no aromaticity. Bridge typing no longer uses RDKit. The chirality check used by ``--linearise-ring-break`` now converts the ghost-free end state, and skips linearisation with a warning if bond orders can't be inferred [#23](https://github.com/OpenBioSim/ghostly/pull/23).
 * Decide triple junction planarity from the energy needed to flatten the angle terms between the physical neighbours of the bridge, rather than its RDKit hybridisation. Junctions with a missing angle term are treated as non-planar [#23](https://github.com/OpenBioSim/ghostly/pull/23).
 * Decide whether a bridge is in a ring, for stiffening and keeping impropers, from the physical atoms of the end state, so rings closed only by ghost atoms don't count [#23](https://github.com/OpenBioSim/ghostly/pull/23).
@@ -21,28 +21,28 @@ Changelog
 [2026.2.0](https://github.com/openbiosim/ghostly/compare/2026.1.0...2026.2.0) - Sep 2026
 ----------------------------------------------------------------------------------------
 
-* Revert auto-zeroing of anchor dihedrals for ring-constrained immediate ghosts: a singly-attached ring still has one unconstrained rotational degree of freedom about the bridge-ghost bond, so removing the anchor reintroduces flapping risk.
+* Revert auto-zeroing of anchor dihedrals for ring-constrained immediate ghosts: a singly-attached ring still has one unconstrained rotational degree of freedom about the bridge-ghost bond, so removing the anchor reintroduces flapping risk [#13](https://github.com/OpenBioSim/ghostly/pull/13).
 
 [2026.1.0](https://github.com/openbiosim/ghostly/compare/2025.2.0...2026.1.0) - Jun 2026
 ----------------------------------------------------------------------------------------
 
-* Add linear spacer modification for ring-breaking ghost bridges.
-* Fixed missing removal of bridge-extension dihedrals (`real–ghost–ghost–ghost`) that arise when a ghost group contains a ring, e.g. cyclopropyl, where the ring topology creates spurious torsional coupling between the real scaffold and the ghost ring interior.
-* Auto-zero anchor dihedrals when the immediate ghost atom lies on a ring within the ghost subgraph. The ring topology already constrains the ghost orientation relative to the bridge, making the anchor redundant.
+* Add linear spacer modification for ring-breaking ghost bridges [#9](https://github.com/OpenBioSim/ghostly/pull/9).
+* Fixed missing removal of bridge-extension dihedrals (`real–ghost–ghost–ghost`) that arise when a ghost group contains a ring, e.g. cyclopropyl, where the ring topology creates spurious torsional coupling between the real scaffold and the ghost ring interior [#10](https://github.com/OpenBioSim/ghostly/pull/10).
+* Auto-zero anchor dihedrals when the immediate ghost atom lies on a ring within the ghost subgraph. The ring topology already constrains the ghost orientation relative to the bridge, making the anchor redundant [#10](https://github.com/OpenBioSim/ghostly/pull/10).
 
 [2025.2.0](https://github.com/openbiosim/ghostly/compare/2025.1.0...2025.2.0) - Mar 2026
 ----------------------------------------------------------------------------------------
 
-* Ensure that there are independent, per-state, physical neighbours. This removes the spurious cross-state ghost filter that resulted in a downgrading of junction types when multiple junctions were present in the molecule.
-* Added a fallback for failed angle optimisation to ensure that the original equilibrium value is preserved when convergence fails.
-* Added new ``--stiffen-ring-bridges`` option to control whether angle stiffening is applied to ring bridge atoms. (Default: False)
-* Added ``--stiffen-sp2-bridges`` to control whether angle stiffening is applied to SP2 bridge atoms. (Default: False)
-* Added ``--soften-anchors`` option to scale the force constants of surviving mixed ghost/physical dihedrals. (Default: 1.0, i.e. no softening)
-* Added rotamer anchor detection and options to stiffen the force constant using ``--stiffen-rotamers`` and ``--k-rotamer``. (Default: False, 50 kcal/mol)
-* Added scoring functionality to try to avoid anchoring through transmuting or bridge atoms where possible.
-* Handle edge cases for ring-breaking perturbations.
-* Fixed angle removal logic for ring and sp2 bridge atoms: when stiffening is skipped (``stiffen_ring_bridges=False`` or ``stiffen_sp2_bridges=False``), all ghost-containing angles are now preserved at their original force field values rather than removing the intraghost angles (dual junctions) or the sacrificial physical-bridge-ghost angle (triple junctions).
-* Changed the default for ``--optimise-angles`` to ``False``. Angle optimisation is conformer-dependent: different input geometries can yield different equilibrium angles for the same perturbation, adding variability to the resulting force field. The original force field theta0 is sufficient given the small ``k_soft`` value. Optimisation can still be enabled explicitly to follow Boresch et al. (JCTC 2021) strictly.
+* Ensure that there are independent, per-state, physical neighbours. This removes the spurious cross-state ghost filter that resulted in a downgrading of junction types when multiple junctions were present in the molecule [#7](https://github.com/OpenBioSim/ghostly/pull/7).
+* Added a fallback for failed angle optimisation to ensure that the original equilibrium value is preserved when convergence fails [#7](https://github.com/OpenBioSim/ghostly/pull/7).
+* Added new ``--stiffen-ring-bridges`` option to control whether angle stiffening is applied to ring bridge atoms. (Default: False) [#7](https://github.com/OpenBioSim/ghostly/pull/7).
+* Added ``--stiffen-sp2-bridges`` to control whether angle stiffening is applied to SP2 bridge atoms. (Default: False) [#7](https://github.com/OpenBioSim/ghostly/pull/7).
+* Added ``--soften-anchors`` option to scale the force constants of surviving mixed ghost/physical dihedrals. (Default: 1.0, i.e. no softening) [#7](https://github.com/OpenBioSim/ghostly/pull/7).
+* Added rotamer anchor detection and options to stiffen the force constant using ``--stiffen-rotamers`` and ``--k-rotamer``. (Default: False, 50 kcal/mol) [#7](https://github.com/OpenBioSim/ghostly/pull/7).
+* Added scoring functionality to try to avoid anchoring through transmuting or bridge atoms where possible [#7](https://github.com/OpenBioSim/ghostly/pull/7).
+* Handle edge cases for ring-breaking perturbations [#7](https://github.com/OpenBioSim/ghostly/pull/7).
+* Fixed angle removal logic for ring and sp2 bridge atoms: when stiffening is skipped (``stiffen_ring_bridges=False`` or ``stiffen_sp2_bridges=False``), all ghost-containing angles are now preserved at their original force field values rather than removing the intraghost angles (dual junctions) or the sacrificial physical-bridge-ghost angle (triple junctions) [#7](https://github.com/OpenBioSim/ghostly/pull/7).
+* Changed the default for ``--optimise-angles`` to ``False``. Angle optimisation is conformer-dependent: different input geometries can yield different equilibrium angles for the same perturbation, adding variability to the resulting force field. The original force field theta0 is sufficient given the small ``k_soft`` value. Optimisation can still be enabled explicitly to follow Boresch et al. (JCTC 2021) strictly [#8](https://github.com/OpenBioSim/ghostly/pull/8).
 
 [2025.1.0](https://github.com/OpenBioSim/ghostly/releases/tag/2025.1.0) - Nov 2025
 ----------------------------------------------------------------------------------
