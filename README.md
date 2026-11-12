@@ -28,20 +28,24 @@ handle the diversity of perturbations encountered in practice:
 
 - **Anchor selection scoring:** physical anchor atoms are scored to avoid
   transmuting or bridge atoms, preventing geometrically inconsistent constraints.
-- **Ring and sp2 bridge handling:** angle stiffening is skipped by default for
-  ring and sp2 bridges, where local geometry already constrains the ghost and
-  90° stiffening would introduce significant strain. It can be re-enabled via
-  `--stiffen-ring-bridges` and `--stiffen-sp2-bridges`.
+- **Ring bridge handling:** ring bridges are not stiffened. Instead, their
+  improper dihedrals with a single ghost are kept, holding the ghost in the
+  plane of the ring, where the rigid ring keeps the coupling acceptable. All
+  other bridges are stiffened.
+- **Junction planarity:** whether a triple junction, or a bridge for rotamer
+  detection, is planar is decided from the energy needed to flatten the angle
+  terms between its neighbours.
 - **Residual term cleanup:** a post-processing pass removes mixed improper
-  dihedrals and cross-bridge dihedrals missed by the per-bridge junction
-  handlers, as well as angles where a ghost atom is the central atom and both
-  terminal atoms are physical.
+  dihedrals (other than those at ring bridges) and cross-bridge dihedrals
+  missed by the per-bridge junction handlers, as well as angles where a ghost
+  atom is the central atom and both terminal atoms are physical.
 - **Mixed dihedral softening:** surviving mixed ghost/physical dihedrals can
   be softened via `--soften-anchors` to allow ghost groups to reorient and
   avoid steric clashes at small λ.
-- **Rotamer stiffening:** `--stiffen-rotamers` replaces rotatable sp3 anchor
-  dihedrals with a stiff single-well cosine to control ghost orientation
-  through flexible bonds.
+- **Rotamer stiffening:** `--stiffen-rotamers` replaces anchor dihedrals
+  across rotatable bonds, i.e. those not in a ring whose bridge atom is neither
+  planar nor linear, with a stiff single-well cosine to control ghost
+  orientation through flexible bonds.
 - **Ring-breaking perturbations:** adjacent bridges with independent ghost
   groups retain each other as physical neighbours; angles with a ghost central
   atom spanning two physical neighbours are replaced by a linear spacer

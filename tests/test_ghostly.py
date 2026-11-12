@@ -1,3 +1,4 @@
+import pytest
 import sire as sr
 
 from ghostly import modify
@@ -124,10 +125,8 @@ def test_toluene_to_pyridine():
         for dihedral in missing_dihedrals
     )
 
-    # Bridge atom 1 is in an aromatic ring. Boresch notes that for rigid ring
-    # systems the coupling is acceptable, and the ring geometry already
-    # constrains the ghost position, so no stiffening is applied. The angles
-    # involving the ring-bridge ghost should be unchanged.
+    # Bridge atom 1 is in an aromatic ring, so the angles involving its ghost
+    # are unchanged and its improper is kept.
     ring_bridge_angles = [
         (AtomIdx(0), AtomIdx(1), AtomIdx(2)),
         (AtomIdx(0), AtomIdx(1), AtomIdx(6)),
@@ -154,6 +153,15 @@ def test_toluene_to_pyridine():
         if angle_idx in orig_angle_map and angle_idx in new_angle_map:
             assert orig_angle_map[angle_idx] == new_angle_map[angle_idx]
 
+    # The improper centred on the ring bridge with the ghost should be kept.
+    ring_bridge_improper = (AtomIdx(0), AtomIdx(1), AtomIdx(6), AtomIdx(2))
+    assert check_improper(
+        info, mols[0].property("improper1").potentials(), *ring_bridge_improper
+    )
+    assert check_improper(
+        info, new_mols[0].property("improper1").potentials(), *ring_bridge_improper
+    )
+
 
 def test_acetone_to_propenol():
     """
@@ -175,9 +183,8 @@ def test_acetone_to_propenol():
     k_hard = 100
 
     # Apply the ghost atom modifications. Bridge atom 3 is sp2 (carbonyl
-    # carbon): explicitly enable sp2 stiffening to test the canonical Boresch
-    # planar triple junction behaviour.
-    new_mols, _ = modify(mols, k_hard=k_hard, stiffen_sp2_bridges=True)
+    # carbon), giving the canonical Boresch planar triple junction.
+    new_mols, _ = modify(mols, k_hard=k_hard)
 
     # Get the new angles and dihedrals.
     new_angles0 = new_mols[0].property("angle0")
@@ -393,9 +400,8 @@ def test_ejm49_to_ejm31():
 
     assert all(check_dihedral(info, new_dihedrals1.potentials(), *d) for d in anchor1)
 
-    # Bridge atom 17 is sp2 and not in a ring. With stiffen_sp2_bridges=False
-    # (the default), stiffening is skipped to avoid ~30° strain. Check that
-    # these angles are unchanged at both end states.
+    # Bridge atom 17 is sp2 and not in a ring, so its physical-bridge-ghost
+    # angles are stiffened to 90 degrees at both end states.
     sp2_bridge_angles0 = [
         (AtomIdx(16), AtomIdx(17), AtomIdx(39)),
         (AtomIdx(18), AtomIdx(17), AtomIdx(39)),
@@ -405,46 +411,21 @@ def test_ejm49_to_ejm31():
         (AtomIdx(18), AtomIdx(17), AtomIdx(20)),
     ]
 
-    orig_angle_map0 = {
-        (
-            info.atom_idx(p.atom0()),
-            info.atom_idx(p.atom1()),
-            info.atom_idx(p.atom2()),
-        ): str(p.function())
-        for p in angles0.potentials()
-    }
-    new_angle_map0 = {
-        (
-            info.atom_idx(p.atom0()),
-            info.atom_idx(p.atom1()),
-            info.atom_idx(p.atom2()),
-        ): str(p.function())
-        for p in new_angles0.potentials()
-    }
-    orig_angle_map1 = {
-        (
-            info.atom_idx(p.atom0()),
-            info.atom_idx(p.atom1()),
-            info.atom_idx(p.atom2()),
-        ): str(p.function())
-        for p in angles1.potentials()
-    }
-    new_angle_map1 = {
-        (
-            info.atom_idx(p.atom0()),
-            info.atom_idx(p.atom1()),
-            info.atom_idx(p.atom2()),
-        ): str(p.function())
-        for p in new_angles1.potentials()
-    }
-
-    for angle_idx in sp2_bridge_angles0:
-        if angle_idx in orig_angle_map0 and angle_idx in new_angle_map0:
-            assert orig_angle_map0[angle_idx] == new_angle_map0[angle_idx]
-
-    for angle_idx in sp2_bridge_angles1:
-        if angle_idx in orig_angle_map1 and angle_idx in new_angle_map1:
-            assert orig_angle_map1[angle_idx] == new_angle_map1[angle_idx]
+    stiffened = "100 [theta - 1.5708]^2"
+    for new_angles, sp2_bridge_angles in (
+        (new_angles0, sp2_bridge_angles0),
+        (new_angles1, sp2_bridge_angles1),
+    ):
+        new_angle_map = {
+            (
+                info.atom_idx(p.atom0()),
+                info.atom_idx(p.atom1()),
+                info.atom_idx(p.atom2()),
+            ): str(p.function())
+            for p in new_angles.potentials()
+        }
+        for angle_idx in sp2_bridge_angles:
+            assert new_angle_map[angle_idx] == stiffened
 
     # Create improper IDs for the missing impropers at lambda = 0.
     missing_impropers0 = [
@@ -717,6 +698,58 @@ def test_pfkfb3_48_to_47_skipped_neighbour():
             assert str(p.function()) == original[idx]
 
 
+def test_pfkfb3_48_to_47_linear_bridge():
+    """
+    Test that a linear dual bridge is stiffened through every physical
+    neighbour, even a poorly-scoring one, since its ghost angles can only all
+    be satisfied at 90 degrees.
+    """
+
+    from math import pi
+
+    from sire.legacy.CAS import Symbol
+    from sire.legacy.MM import AmberAngle
+    from sire.legacy.Mol import AtomIdx, Element
+
+    mols = sr.load_test_files("pfkfb3_48_47.s3")
+
+    angles0 = mols[0].property("angle0")
+    angles0.set(
+        AtomIdx(13),
+        AtomIdx(27),
+        AtomIdx(28),
+        AmberAngle(100, pi).to_expression(Symbol("theta")),
+    )
+    mol = (
+        mols[0]
+        .edit()
+        .atom(28)
+        .set_property("element1", Element("N"))
+        .molecule()
+        .set_property("angle0", angles0)
+    )
+    mols.update(mol.commit())
+
+    _, modifications = modify(mols)
+
+    def key(idx):
+        i, j, k = idx.split(",")
+        return ",".join(sorted((i, k)) + [j])
+
+    stiffened = {
+        key(idx): params
+        for idx, params in modifications["lambda_0"]["stiffened_angles"].items()
+    }
+    assert set(stiffened) == {
+        "13,47,27",
+        "13,48,27",
+        "28,47,27",
+        "28,48,27",
+        "47,48,27",
+    }
+    assert stiffened["47,48,27"]["theta0"] == 180.0
+
+
 def test_stiffen_rotamers_reference_geometry():
     """
     Test that stiffened rotamer anchor dihedrals have their minimum at the
@@ -954,6 +987,205 @@ def test_single_well_skips_reference_ghost():
     assert _single_well(ref, idxs, 5, {AtomIdx(1)}) is None
 
 
+def test_flattening_energy():
+    """
+    Test the energy needed to flatten a bridge atom and three of its neighbours.
+    """
+
+    import sire.morph as morph
+    from sire.legacy.Mol import AtomIdx
+
+    from ghostly._ghostly import (
+        _MAX_PLANAR_FLATTENING,
+        _create_connectivity,
+        _flattening_energy,
+    )
+
+    # An aromatic carbon in toluene is planar.
+    mol = sr.load_test_files("tol2pyr.s3")[0]
+    atoms = [AtomIdx(0), AtomIdx(2), AtomIdx(6)]
+    assert _flattening_energy(mol, AtomIdx(1), atoms) < 0.01
+
+    # An sp3 carbon in hexane is not.
+    mol = sr.load_test_files("hex2prp.s3")[0]
+    connectivity = _create_connectivity(morph.link_to_reference(mol))
+    neighbours = list(connectivity.connections_to(AtomIdx(1)))
+    assert _flattening_energy(mol, AtomIdx(1), neighbours[:3]) > _MAX_PLANAR_FLATTENING
+
+    # There is no energy without three angle terms.
+    assert _flattening_energy(mol, AtomIdx(1), neighbours[:2]) is None
+
+
+def test_is_rotor():
+    """
+    Test whether bridge atoms are rotors, i.e. neither planar nor linear.
+    """
+
+    import sire.morph as morph
+    from sire.legacy.Mol import AtomIdx
+
+    from ghostly._ghostly import _create_connectivity, _is_rotor
+
+    # Four neighbours: an sp3 carbon in hexane.
+    mol = sr.load_test_files("hex2prp.s3")[0]
+    connectivity = _create_connectivity(morph.link_to_reference(mol))
+    assert _is_rotor(mol, AtomIdx(1), connectivity)
+
+    # Three planar neighbours: the carbonyl carbon in acetone.
+    mol = sr.load_test_files("acepol.s3")[0]
+    connectivity0 = _create_connectivity(morph.link_to_reference(mol))
+    assert not _is_rotor(mol, AtomIdx(1), connectivity0)
+
+    # Two neighbours: the hydroxyl oxygen in propenol, which is bent at about
+    # 108 degrees, so only counts as linear with a lower threshold.
+    connectivity1 = _create_connectivity(morph.link_to_perturbed(mol))
+    assert _is_rotor(mol, AtomIdx(9), connectivity1, is_lambda1=True)
+    assert not _is_rotor(mol, AtomIdx(9), connectivity1, is_lambda1=True, max_angle=100)
+
+
+def test_in_ring():
+    """
+    Test ring detection, including macrocycles.
+    """
+
+    from sire.legacy.Mol import AtomIdx
+
+    connectivity = sr.smiles("C1CCCCCCCCCCCCC1").property("connectivity")
+    assert connectivity.in_ring(AtomIdx(0))
+    assert connectivity.in_ring(AtomIdx(0), AtomIdx(1))
+
+    mol = sr.smiles("C1CCCCC1CC")
+    connectivity = mol.property("connectivity")
+    assert connectivity.in_ring(AtomIdx(0))
+    assert not connectivity.in_ring(AtomIdx(mol.num_atoms() - 1))
+    assert not connectivity.in_ring(AtomIdx(5), AtomIdx(6))
+
+
+def test_physical_connectivity_ring():
+    """
+    Test that a ring bridge is found from the physical atoms of an end state.
+    """
+
+    import sire.morph as morph
+    from sire.legacy.Mol import AtomIdx
+
+    from ghostly._ghostly import _create_connectivity, _physical_connectivity
+
+    # Toluene to pyridine: at lambda = 1 the methyl carbon is a ghost bonded to
+    # the ring, which stays a ring once the bonds to ghosts are removed.
+    mol = sr.load_test_files("tol2pyr.s3")[0]
+    connectivity = _create_connectivity(morph.link_to_perturbed(mol))
+    ghosts = [
+        AtomIdx(i)
+        for i, e in enumerate(mol.property("element1"))
+        if e.num_protons() == 0
+    ]
+    physical = _physical_connectivity(mol, connectivity, ghosts)
+    assert not physical.are_bonded(AtomIdx(0), AtomIdx(1))
+    assert physical.in_ring(AtomIdx(1))
+
+
+def test_to_rdkit_end_state():
+    """
+    Test the conversion of an end state to RDKit without its ghost atoms.
+    """
+
+    from ghostly._ghostly import _to_rdkit_end_state
+
+    mol = sr.load_test_files("tol2pyr.s3")[0]
+
+    # At lambda = 1 the methyl group is a ghost, so atom 1, the pyridine
+    # nitrogen, comes first.
+    rdmol, index = _to_rdkit_end_state(mol, is_lambda1=True)
+    num_physical = sum(e.num_protons() > 0 for e in mol.property("element1"))
+    assert rdmol.GetNumAtoms() == num_physical
+    assert 0 not in index
+    assert index[1] == 0
+    atom = rdmol.GetAtomWithIdx(index[1])
+    assert atom.GetSymbol() == "N" and atom.GetIsAromatic()
+
+    # At lambda = 0 every atom is physical and the ring is aromatic.
+    rdmol, index = _to_rdkit_end_state(mol, is_lambda1=False)
+    assert rdmol.GetNumAtoms() == mol.num_atoms()
+    assert rdmol.GetAtomWithIdx(index[1]).GetIsAromatic()
+
+
+def test_ring_closed_by_ghosts():
+    """
+    Test that a ring closed only through ghost atoms isn't a ring once the bonds
+    to the ghosts are removed.
+    """
+
+    from sire.legacy.Mol import AtomIdx
+
+    from ghostly._ghostly import _physical_connectivity
+
+    mol = sr.smiles("C1CCCCC1")
+    connectivity = mol.property("connectivity")
+    physical = _physical_connectivity(mol, connectivity, [AtomIdx(2), AtomIdx(3)])
+
+    assert connectivity.in_ring(AtomIdx(0))
+    assert not physical.in_ring(AtomIdx(0))
+    assert not physical.in_ring(AtomIdx(0), AtomIdx(1))
+
+
+def test_linearise_ring_break_without_chirality(monkeypatch):
+    """
+    Test that, when chirality can't be checked, only ring-break ghosts that
+    could be stereocentres are left unlinearised.
+    """
+
+    import sire.morph as morph
+    from sire.legacy.Mol import AtomIdx
+
+    import ghostly._ghostly as _ghostly
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("no bond orders")
+
+    monkeypatch.setattr(_ghostly, "_to_rdkit_end_state", fail)
+
+    def modifications():
+        def state():
+            return {
+                "removed_angles": [],
+                "removed_dihedrals": [],
+                "stiffened_angles": {},
+                "softened_angles": {},
+                "softened_dihedrals": [],
+                "stiffened_dihedrals": [],
+                "single_well_dihedrals": [],
+                "linearised_ring_break": [],
+                "softened_bonds": {},
+            }
+
+        return {"lambda_0": state(), "lambda_1": state()}
+
+    # Treating the pyridine nitrogen and the methyl carbon as ghosts at lambda = 1
+    # leaves the nitrogen bonded to two physical atoms. It has three neighbours
+    # in toluene, so can't be a stereocentre, and is linearised.
+    mol = sr.load_test_files("tol2pyr.s3")[0]
+    connectivity = _ghostly._create_connectivity(morph.link_to_perturbed(mol))
+    _, linearised = _ghostly._linearise_ring_break(
+        mol, [AtomIdx(1), AtomIdx(0)], connectivity, modifications(), is_lambda1=True
+    )
+    assert {ghost.value() for ghost in linearised} == {1}
+
+    # A hexane carbon with its hydrogens as ghosts has four or more neighbours
+    # in propane, so could be a stereocentre, and is skipped.
+    mol = sr.load_test_files("hex2prp.s3")[0]
+    connectivity = _ghostly._create_connectivity(morph.link_to_reference(mol))
+    hydrogens = [
+        n
+        for n in connectivity.connections_to(AtomIdx(2))
+        if mol.property("element0")[n.value()].symbol() == "H"
+    ]
+    _, linearised = _ghostly._linearise_ring_break(
+        mol, [AtomIdx(2), *hydrogens], connectivity, modifications()
+    )
+    assert linearised == set()
+
+
 def dihedral_functions(mol, prop):
     """
     Return a dictionary mapping dihedral indices to their functions.
@@ -1016,6 +1248,136 @@ def check_angle(info, potentials, idx0, idx1, idx2):
             return True
 
     return False
+
+
+@pytest.mark.parametrize(
+    "file, state, name",
+    [
+        ("hex2prp.s3", 1, "dihedral"),
+        ("acepol.s3", 0, "dihedral"),
+        ("tol2pyr.s3", 1, "improper"),
+    ],
+)
+def test_linear_ghost_terms(file, state, name):
+    """
+    Test that a ghost dihedral or improper through an angle that is linear at
+    the end state where the ghost is a ghost is removed, as for an anchor at a
+    terminal junction on a nitrile.
+    """
+    from math import pi
+
+    from sire.legacy.CAS import Symbol
+    from sire.legacy.MM import AmberAngle
+
+    mols = sr.load_test_files(file)
+    info = mols[0].info()
+    ghosts = {
+        i
+        for i, e in enumerate(mols[0].property(f"element{state}"))
+        if e.num_protons() == 0
+    }
+
+    def atoms(p, n):
+        return [info.atom_idx(getattr(p, f"atom{i}")()).value() for i in range(n)]
+
+    # Find a surviving ghost term that passes through an angle term.
+    new_mols, _ = modify(mols)
+    angles = {
+        frozenset(atoms(p, 3)): atoms(p, 3)
+        for p in new_mols[0].property(f"angle{state}").potentials()
+    }
+    term, angle = None, None
+    for p in new_mols[0].property(f"{name}{state}").potentials():
+        idx = atoms(p, 4)
+        if p.function().is_zero() or not ghosts & set(idx):
+            continue
+        for triple in (frozenset(idx[:3]), frozenset(idx[1:])):
+            if triple in angles:
+                term, angle = idx, angles[triple]
+                break
+        if term is not None:
+            break
+    assert term is not None
+
+    # Make that angle linear at the end state.
+    theta = Symbol("theta")
+    old = mols[0].property(f"angle{state}")
+    new = old.__class__(info)
+    linearised = False
+    for p in old.potentials():
+        idx = [info.atom_idx(a) for a in (p.atom0(), p.atom1(), p.atom2())]
+        function = p.function()
+        if [i.value() for i in idx] in (angle, angle[::-1]):
+            k = AmberAngle(function, theta).k()
+            function = AmberAngle(k, pi).to_expression(theta)
+            linearised = True
+        new.set(*idx, function)
+    assert linearised
+    mol = mols[0].edit().set_property(f"angle{state}", new).molecule().commit()
+    mols.update(mol)
+
+    new_mols, modifications = modify(mols)
+
+    for p in new_mols[0].property(f"{name}{state}").potentials():
+        idx = atoms(p, 4)
+        if ghosts & set(idx):
+            assert set(angle) not in (set(idx[:3]), set(idx[1:]))
+
+    removed = modifications[f"lambda_{state}"]["removed_dihedrals"]
+    assert ",".join(map(str, term)) in removed
+
+
+def test_hexane_to_propane_avoid_linear_anchor():
+    """
+    Test that a terminal junction is anchored through a candidate that isn't
+    reached through a linear angle, when there is one. At lambda = 1, bridge 3
+    is anchored through 2 to 1, and 2 is also bonded to physical atoms 11 and 12.
+    """
+    from math import pi
+
+    from sire.legacy.CAS import Symbol
+    from sire.legacy.MM import AmberAngle
+
+    mols = sr.load_test_files("hex2prp.s3")
+    info = mols[0].info()
+    ghosts = {
+        i for i, e in enumerate(mols[0].property("element1")) if e.num_protons() == 0
+    }
+
+    def anchors(mol):
+        result = set()
+        for p in mol.property("dihedral1").potentials():
+            idx = [info.atom_idx(getattr(p, f"atom{i}")()).value() for i in range(4)]
+            if p.function().is_zero() or ghosts & set(idx[1:3]):
+                continue
+            if (idx[0] in ghosts) != (idx[3] in ghosts):
+                g, b, p1, p2 = idx if idx[0] in ghosts else idx[::-1]
+                result.add((b, p1, p2))
+        return result
+
+    new_mols, _ = modify(mols)
+    assert anchors(new_mols[0]) == {(3, 2, 1)}
+
+    # Make the angle through the current anchor linear at lambda = 1.
+    theta = Symbol("theta")
+    old = mols[0].property("angle1")
+    new = old.__class__(info)
+    linearised = False
+    for p in old.potentials():
+        idx = [info.atom_idx(getattr(p, f"atom{i}")()) for i in range(3)]
+        function = p.function()
+        if [i.value() for i in idx] in ([3, 2, 1], [1, 2, 3]):
+            k = AmberAngle(function, theta).k()
+            function = AmberAngle(k, pi).to_expression(theta)
+            linearised = True
+        new.set(*idx, function)
+    assert linearised
+    mols.update(mols[0].edit().set_property("angle1", new).molecule().commit())
+
+    new_mols, _ = modify(mols)
+    kept = anchors(new_mols[0])
+    assert kept
+    assert all(b == 3 and p1 == 2 and p2 in (11, 12) for b, p1, p2 in kept)
 
 
 def check_dihedral(info, potentials, idx0, idx1, idx2, idx3):
